@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Phase 1: console logging only. The structured orders.log is a separate NIO file (Phase 6).
+     Never log customer names, addresses, passwords, hashes, secrets or session ids. -->
+<configuration>
+  <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+    <encoder>
+      <pattern>%d{HH:mm:ss.SSS} %-5level [%thread] %logger{36} - %msg%n</pattern>
+    </encoder>
+  </appender>
+
+  <logger name="com.cloudkitchen" level="INFO"/>
+  <logger name="ch.vorburger" level="INFO"/>
+  <logger name="com.zaxxer.hikari" level="INFO"/>
+
+  <root level="INFO">
+    <appender-ref ref="CONSOLE"/>
+  </root>
+</configuration>

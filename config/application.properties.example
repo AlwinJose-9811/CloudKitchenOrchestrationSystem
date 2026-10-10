@@ -1,0 +1,58 @@
+# Cloud Kitchen Orchestration System: configuration TEMPLATE.
+# Copy this file to config/application.properties (which is git-ignored) and edit it.
+# Values starting with CHANGE_ME are placeholders: the application refuses to start while a secret still has one.
+# Never put real passwords or secrets in this example file or in any committed file.
+# Phase 1 reads only the keys marked (used); the rest are listed from SDD section 15 so the file stays the full reference.
+
+# --- Web server ---
+# (used) 0 = random port (tests)
+server.port=8080
+server.session.cookie.secure=false
+
+# --- Database ---
+# (used) embedded (MariaDB4j) or external
+db.mode=embedded
+# (used)
+db.name=cloudkitchen
+# (used)
+db.user=ckapp
+# (used) secret: 12-128 chars from A-Z a-z 0-9 _ . ! @ # % ^ * + = -
+db.password=CHANGE_ME_db_password
+# (used)
+db.embedded.port=3307
+# (used)
+db.embedded.data.dir=./data/db
+# (used)
+db.embedded.base.dir=./data/runtime
+db.pool.max.size=10
+db.pool.connection.timeout.ms=5000
+tx.retry.max=3
+tx.retry.backoff.ms=25
+
+# --- Pipeline (later phases) ---
+station.queue.capacity=50
+queue.offer.timeout.ms=500
+worker.prep.ms=3000
+worker.pack.ms=1000
+worker.delivery.ms=4000
+recovery.sweep.enabled=true
+simulator.default.rate.per.minute=30
+simulator.max.rate.per.minute=600
+simulator.autostart=false
+
+# --- Files and snapshots (later phases) ---
+snapshot.dir=./snapshots
+snapshot.interval.seconds=30
+snapshot.retain.count=10
+snapshot.hmac.secret=CHANGE_ME_at_least_32_characters_long_secret
+log.orders.path=./logs/orders.log
+report.export.dir=./reports
+
+# --- Security (later phases) ---
+security.pbkdf2.iterations=600000
+security.lockout.max.attempts=5
+security.lockout.minutes=5
+bootstrap.admin.username=admin
+bootstrap.admin.password=CHANGE_ME_admin_password
+bootstrap.staff.username=staff
+bootstrap.staff.password=CHANGE_ME_staff_password

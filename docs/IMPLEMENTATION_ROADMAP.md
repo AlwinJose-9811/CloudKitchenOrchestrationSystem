@@ -1,6 +1,6 @@
 # Implementation Roadmap
 
-**Status:** Planned. All checkboxes are unticked. A box is ticked only when the task is done **and** the supporting output is in [EVIDENCE.md](EVIDENCE.md).
+**Status:** Phase 0 and Phase 1 are complete; Phases 2-8 are planned and their boxes are unticked. A box is ticked only when the task is done **and** the supporting output is in [EVIDENCE.md](EVIDENCE.md).
 **Related:** [SRS](SRS.md) · [SDD](SDD.md) · [TRACEABILITY](TRACEABILITY.md) · [TESTING_STRATEGY](TESTING_STRATEGY.md) · [../CLAUDE.md](../CLAUDE.md)
 
 ---
@@ -63,27 +63,27 @@ The exact test-selection commands per phase are listed in each section. Final co
 
 **Goal:** prove the whole zero-install stack works before any domain code exists, and settle the driver and packaging decisions.
 **Depends on:** Phase 0 complete (baseline frozen; the commit of the documents is approved separately by the user).
-**Status: NEXT PHASE, not started.**
+**Status: COMPLETE (2026-10-10), approved by the user for one local commit and the local tag `phase-1-complete`; nothing pushed. Verified on Linux only (EVIDENCE.md EV-001..EV-014); limitations listed in EV-013: Windows, macOS and standalone Tomcat unverified, MariaDB Connector/J untested by the user's decision.**
 **Approvals needed first:** A-01 (internet on first build), A-02 (native DB binary, no system packages), A-03/D-018 (wrapper fetch), A-04 (append to `.gitignore`), A-14 (dependency interpretation).
 
 ### Entry criteria (all must be true before task 1.1; each is checkable)
-- [ ] The user has explicitly approved committing the Phase 0 documents and the commit exists on the designated branch `claude/cloud-kitchen-orchestration-7d1aok` (`git log --oneline` shows it; `git status --short` is clean).
-- [ ] The user has answered **approved / not approved** for each of A-01, A-02, A-03 (D-018), A-04 and A-14 (record the answers in PROJECT_OVERVIEW §6.7).
-- [ ] `java -version` prints 17 or newer and `git --version` works (record both in EVIDENCE.md §2); no other tool is needed.
-- [ ] Outbound HTTPS to Maven Central works: `curl -sI https://repo.maven.apache.org/maven2/ | head -1` shows a 200 (record the output; if it fails, stop and report per A-01).
-- [ ] README.md and `.gitignore` are still untouched except for the approved `.gitignore` append in task 1.3.
+- [x] The user has explicitly approved committing the Phase 0 documents and the commit exists on the designated branch `claude/cloud-kitchen-orchestration-7d1aok` (`git log --oneline` shows it; `git status --short` is clean). Commit `992c1fe`; tree was clean at the start of Phase 1.
+- [x] The user has answered **approved / not approved** for each of A-01, A-02, A-03 (D-018), A-04 and A-14 (record the answers in PROJECT_OVERVIEW §6.7). Answered 2026-10-10: all approved, A-02 with restrictions; recorded in PROJECT_OVERVIEW §6.7.
+- [x] `java -version` prints 17 or newer and `git --version` works (record both in EVIDENCE.md §2); no other tool is needed. OpenJDK 21.0.12.1, git 2.43.0, recorded in EVIDENCE.md §2.
+- [x] Outbound HTTPS to Maven Central works: `curl -sI https://repo.maven.apache.org/maven2/ | head -1` shows a 200 (record the output; if it fails, stop and report per A-01). It failed (HTTP 403 policy denial) until the user changed the environment network settings, then every Maven host returned HTTP 200 (EV-007). Note: behind the agent proxy this exact command prints the proxy line `HTTP/1.1 200 Connection Established`; use `curl -s -o /dev/null -w '%{http_code}'` for the real status.
+- [x] README.md and `.gitignore` are still untouched except for the approved `.gitignore` append in task 1.3. `README.md` unchanged; `.gitignore` only appended (13 lines, none removed).
 
 ### Tasks
-- [ ] 1.1 `pom.xml`: `packaging=war`, `maven.compiler.release=17`, UTF-8; pinned versions (A-10) for tomcat-embed-core, tomcat-embed-jasper (10.1.x), Jakarta Servlet/JSP/JSTL API + JSTL implementation, HikariCP, MySQL Connector/J, MariaDB4j (+ platform DB artifacts), SLF4J, Logback, JUnit 5; plugins: compiler, surefire (JUnit platform, `forkCount=1`), war, exec (mainClass `com.cloudkitchen.bootstrap.Launcher`, `classpathScope` per D-017), resources.
-- [ ] 1.2 Maven Wrapper: `mvnw`, `mvnw.cmd`, `.mvn/wrapper/maven-wrapper.properties` ("only-script"), executable bit on `mvnw`; `.gitattributes` (`mvnw` LF, `mvnw.cmd` CRLF).
-- [ ] 1.3 Append to `.gitignore` (A-04): `target/`, `data/`, `logs/`, `snapshots/`, `reports/`, `config/application.properties`, `*.ser`, `.idea/`, `*.iml`, `.vscode/`, `.DS_Store`.
-- [ ] 1.4 `config/application.properties.example` (placeholders only; startup rejects placeholders for secrets) and a minimal `AppConfig` sufficient for the spike.
-- [ ] 1.5 Package skeleton: directories and `package-info.java` for every package in [SDD §3](SDD.md) (one-line Javadoc each); `src/main/resources/logback.xml`.
-- [ ] 1.6 Throwaway-but-kept spike code: `Launcher` (embedded Tomcat, port from config, `addWebapp`, `/spike.jsp` using JSTL, a plain servlet), `DbBootstrap` (MariaDB4j start/stop, data dir `./data`), `web.xml` with two ordered filters and a listener.
-- [ ] 1.7 Spike tests `DbSpikeTest` and `EmbeddedTomcatSpikeTest` covering checklist S-01..S-19 (below); run `DbSpikeTest` once per candidate driver.
-- [ ] 1.8 Decide the driver (D-002), packaging approach (D-017), wrapper (D-018), config hand-off (O-3); record versions and decisions with dates in PROJECT_OVERVIEW §6.7.
-- [ ] 1.9 Record the actual first-run requirements (downloads, any OS libraries) in EVIDENCE.md and update assumptions A-01/A-02 to facts.
-- [ ] 1.10 Fill in CLAUDE.md "Build / run / test commands" with the commands proven in this phase.
+- [x] 1.1 `pom.xml`: `packaging=war`, `maven.compiler.release=17`, UTF-8; pinned versions (A-10) for tomcat-embed-core, tomcat-embed-jasper (10.1.x), Jakarta Servlet/JSP/JSTL API + JSTL implementation, HikariCP, MySQL Connector/J, MariaDB4j (+ platform DB artifacts), SLF4J, Logback, JUnit 5; plugins: compiler, surefire (JUnit platform, `forkCount=1`), war, exec (mainClass `com.cloudkitchen.bootstrap.Launcher`, `classpathScope` per D-017), resources. **Done:** `pom.xml` with pinned versions, WAR packaging, `provided` embedded artifacts (D-017), JSTL exclusions; EV-011.
+- [x] 1.2 Maven Wrapper: `mvnw`, `mvnw.cmd`, `.mvn/wrapper/maven-wrapper.properties` ("only-script"), executable bit on `mvnw`; `.gitattributes` (`mvnw` LF, `mvnw.cmd` CRLF). **Done:** `mvnw`, `mvnw.cmd`, `.mvn/wrapper/maven-wrapper.properties` (Maven 3.9.16, SHA-256 pinned), `.gitattributes`; EV-001. `mvnw.cmd` not run.
+- [x] 1.3 Append to `.gitignore` (A-04): `target/`, `data/`, `logs/`, `snapshots/`, `reports/`, `config/application.properties`, `*.ser`, `.idea/`, `*.iml`, `.vscode/`, `.DS_Store`. **Done:** 13 lines appended to `.gitignore`; PROJECT_OVERVIEW 6.7.
+- [x] 1.4 `config/application.properties.example` (placeholders only; startup rejects placeholders for secrets) and a minimal `AppConfig` sufficient for the spike. **Done:** `config/application.properties.example` and `AppConfig` (Phase 1 keys); EV-008.
+- [x] 1.5 Package skeleton: directories and `package-info.java` for every package in [SDD §3](SDD.md) (one-line Javadoc each); `src/main/resources/logback.xml`. **Done:** 19 `package-info.java` and `logback.xml`; EV-008.
+- [x] 1.6 Throwaway-but-kept spike code: `Launcher` (embedded Tomcat, port from config, `addWebapp`, `/spike.jsp` using JSTL, a plain servlet), `DbBootstrap` (MariaDB4j start/stop, data dir `./data`), `web.xml` with two ordered filters and a listener. **Done:** `Launcher`, `DbBootstrap` (hardened, D-043), `web.xml` (two ordered filters, listener), `/spike.jsp` and `/health`; EV-009, EV-012.
+- [x] 1.7 Spike tests `DbSpikeTest` and `EmbeddedTomcatSpikeTest` covering checklist S-01..S-19 (below); run `DbSpikeTest` once per candidate driver. **Done:** `DbSpikeTest`, `EmbeddedTomcatSpikeTest`, `LauncherShutdownSpikeTest`, `CryptoSpikeTest`, `AppConfigTest` and `ArchitectureRulesTest` pass with MySQL Connector/J (EV-006, EV-008..EV-010, EV-014). The "once per candidate driver" wording was reconciled with the locked fallback ladder by the user's decision of 2026-10-10: the only candidate is Connector/J, MariaDB Connector/J was not run and is untested (PROJECT_OVERVIEW 6.7, D-002).
+- [x] 1.8 Decide the driver (D-002), packaging approach (D-017), wrapper (D-018), config hand-off (O-3); record versions and decisions with dates in PROJECT_OVERVIEW §6.7. **Done:** D-002 (accepted by the user), D-017, D-018, O-3 settled; PROJECT_OVERVIEW 6.7.
+- [x] 1.9 Record the actual first-run requirements (downloads, any OS libraries) in EVIDENCE.md and update assumptions A-01/A-02 to facts. **Done:** first-run requirements in EVIDENCE.md 2 and EV-007; A-01, A-02, A-03 updated to facts.
+- [x] 1.10 Fill in CLAUDE.md "Build / run / test commands" with the commands proven in this phase. **Done:** CLAUDE.md section 8 filled in (verified on Linux only).
 
 ### Spike checklist (each item pass/fail with evidence)
 | ID | Check |
@@ -110,11 +110,11 @@ The exact test-selection commands per phase are listed in each section. Final co
 | S-19 | Row-lock and current-read behaviour that the fencing invariant relies on (SDD §7.11.15 item 4): with two connections a competing conditional `UPDATE` on the same `orders` row blocks until the first transaction commits and then re-evaluates its predicate on the committed row (no lost update, no stale-predicate success) under `REPEATABLE READ`, also with an injected delay between the `UPDATE` and the commit; record `innodb_lock_wait_timeout` and the error code when it expires |
 
 ### Exit criteria
-- [ ] S-01..S-19 all pass, or any failure has a decision recorded with the user's approval via the fallback ladder (PROJECT_OVERVIEW §6.3).
-- [ ] Driver chosen and recorded; DAO plan unchanged.
-- [ ] No system software was installed; first-run requirements documented.
-- [ ] `.gitignore` additions in place; secret scan clean.
-- [ ] CLAUDE.md commands filled in.
+- [x] S-01..S-19 all pass, or any failure has a decision recorded with the user's approval via the fallback ladder (PROJECT_OVERVIEW §6.3). Every executed item passed (EV-001, EV-003, EV-006, EV-009..EV-012, EV-014). Not executed, by the user's decision of 2026-10-10: the MariaDB Connector/J repeat named in S-03 and S-10 (MariaDB Connector/J is untested; see task 1.7).
+- [x] Driver chosen and recorded; DAO plan unchanged. MySQL Connector/J 9.7.0 (D-002, accepted by the user); DAOs stay plain JDBC.
+- [x] No system software was installed; first-run requirements documented. Nothing was installed; the only environment change was the permissions of the project root directory (`root:claude 1775`, non-recursive) so the unprivileged user can build (EV-013).
+- [x] `.gitignore` additions in place; secret scan clean. EV-013.
+- [x] CLAUDE.md commands filled in. Linux only.
 
 ### Gate commands
 ```
@@ -389,8 +389,8 @@ Plus G-SECRET, G-TREE, G-TAG.
 
 ## Master checklist (tick when the phase gate is evidenced and approved)
 
-- [x] Phase 0 documentation baseline complete and frozen (2026-10-10); commit pending the user's approval
-- [ ] Phase 1 Skeleton + zero-install spike
+- [x] Phase 0 documentation baseline complete and frozen (2026-10-10); committed as `992c1fe`
+- [x] Phase 1 Skeleton + zero-install spike (local commit and tag `phase-1-complete`, not pushed; Linux-only evidence)
 - [ ] Phase 2 Domain + services (no DB)
 - [ ] Phase 3 Persistence
 - [ ] Phase 4 Concurrent pipeline

@@ -223,6 +223,16 @@ flowchart LR
 
 Note on the service/pipeline cycle: `OrderService` depends on the *interface* `OrderDispatcher`; `OrderOrchestrator` implements it and also depends on `OrderService` (used by workers). The cycle is broken at construction time: `AppContext` creates the orchestrator first, passes it to `OrderService` as an `OrderDispatcher`, then calls `orchestrator.start(orderService, stations)` (see §2.4).
 
+### 2.3a Embedded database security (Phase 1 finding, EV-004/EV-005, decision D-043)
+
+MariaDB4j starts the server with `--skip-grant-tables` and no `--bind-address`: any client, with any user name and no password, gets full access on every network interface of the host, and the installer also leaves anonymous accounts and a `test` database. `DbBootstrap` therefore does not use that configuration:
+
+1. **One-time bootstrap** (marker file `<data dir>/.ck-hardened` absent): start the server socket-only (`--skip-grant-tables --skip-networking`, socket inside the project's `data/` tree with owner-only permissions), delete the anonymous accounts, drop `test`, create the application database (`utf8mb4`, `utf8mb4_unicode_ci`) and the application account (`db.user`, password `db.password`, granted only on that database, for `127.0.0.1` and `localhost`), stop the server, write the marker.
+2. **Every start**: grants enforced (no `--skip-grant-tables`) and `--bind-address=127.0.0.1`.
+3. `root` keeps the installer's `unix_socket` authentication, so it cannot be used over TCP. `db.password` must match `[A-Za-z0-9_.!@#%^*+=-]{12,128}` (it is placed in a SQL literal during bootstrap; quotes and backslashes are rejected).
+4. Consequence: changing `db.password` for an existing data directory does not change the stored password; delete `data/db` (embedded data only) or change it with an administrative step in a later phase.
+5. The server refuses to run as the operating-system `root` user (MariaDB's own rule); run the application as an ordinary user. See EVIDENCE.md EV-002/EV-003.
+
 ### 2.4 Startup and composition (`AppContext`)
 
 Manual wiring, in this order (each step logs at INFO). Any failure aborts startup after cleaning up what was already started.
@@ -276,12 +286,13 @@ com.cloudkitchen
 ├── snapshot           OrderSnapshotDTO, SnapshotService, HmacSigner, SnapshotFilterFactory, SnapshotTask
 ├── util               MoneyUtil, TimeUtil
 └── web
-    ├── controller     ErrorServlet, HomeServlet, LoginServlet, LogoutServlet, DashboardServlet,
+    ├── controller     HealthServlet (Phase 1: GET /health -> 200 "OK", public), ErrorServlet, HomeServlet, LoginServlet, LogoutServlet, DashboardServlet,
     │                  OrderListServlet, OrderDetailServlet, OrderCreateServlet, OrderCancelServlet,
     │                  InventoryServlet, AdminMenuServlet, AdminStockServlet, SimulatorServlet,
     │                  WorkerPanelServlet, CompensationServlet, ReportServlet, SnapshotServlet, TrackServlet (COULD),
     │                  UserAdminServlet (COULD)
     ├── filter         EncodingFilter, SecurityHeadersFilter, CsrfFilter, AuthFilter, RoleFilter
+    │                  (Phase 1 only: SpikeOrderFilterFirst, SpikeOrderFilterSecond, descriptor-order probes replaced in Phase 7)
     ├── listener       AppBootstrapListener
     └── support        BaseServlet, CsrfTokens, Flash, RoutePolicy
 ```

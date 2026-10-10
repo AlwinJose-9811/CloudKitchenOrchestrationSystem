@@ -2,7 +2,7 @@
 
 Read this file at the start of **every** session. It is short on purpose; the details live in `docs/`.
 
-**Current status:** Phase 0 (documentation baseline) is **complete and frozen** (2026-10-10; the commit awaits the user's approval). Phase 1 is next and has not started. **No application code, SQL or build files exist yet.** Do not claim anything is implemented. The active phase is recorded in the table at the end of this file.
+**Current status:** Phase 0 (documentation baseline) is **complete, frozen and committed** (2026-10-10, commit `992c1fe`). Phase 1 (skeleton + zero-install spike) is **complete**: one local commit tagged `phase-1-complete` holds the code, tests and evidence (see `docs/EVIDENCE.md`); nothing has been pushed, and Windows, macOS and standalone Tomcat remain unverified. Phase 2 has not started and needs the user's explicit go-ahead. Only a skeleton, the embedded-database/Tomcat/JDBC spikes and their tests exist; **no domain code, schema SQL or business logic exists.** Do not claim anything else is implemented. The active phase is recorded in the table at the end of this file.
 
 ## 1. What this project is
 A Java web app (Servlets + JSP + JDBC + MySQL-compatible DB, Tomcat 10.1) for an undergraduate project, built by one developer with Claude Code across several sessions. It accepts simulated orders from Swiggy, Zomato and an in-house app, validates them, routes each to its brand's kitchen station, processes them concurrently, tracks the lifecycle and persists everything.
@@ -19,7 +19,7 @@ A Java web app (Servlets + JSP + JDBC + MySQL-compatible DB, Tomcat 10.1) for an
 ## 3. Locked decisions (never change; report conflicts instead)
 - **Zero-install:** only JDK 17+, Git, browser, Claude Code. **Never require or install** Maven, MySQL, Tomcat, Docker or any system software. Use Maven Wrapper (`./mvnw`, `mvnw.cmd`). Tomcat 10.1 is **embedded** (`tomcat-embed-core`, `tomcat-embed-jasper` 10.1.x) and started by `Launcher` via `./mvnw exec:java`; the build also produces a standard WAR for standalone Tomcat 10.1. The DB is embedded **MariaDB4j** started by `DbBootstrap`, data in `./data` (git-ignored).
 - **SQL** stays in the common MySQL/MariaDB subset so the same scripts run on MySQL 8 by changing config only. Driver: try **MySQL Connector/J** first; if the Phase 1 spike shows incompatibility use **MariaDB Connector/J**. DAO code is plain driver-agnostic JDBC. Fallback ladder and decision log: `docs/PROJECT_OVERVIEW.md` §6. **H2 only with the user's explicit approval.**
-- **Stack:** Java 17, Servlet 6.0, JSP 3.1, Jakarta JSTL, JUnit 5, SLF4J + Logback, HikariCP. **No** Spring, JPA, Hibernate, Mockito. No other dependency without approval. Web tests: embedded Tomcat on a random port + `java.net.http.HttpClient`.
+- **Stack:** Java 17, Servlet 6.0, JSP 3.1, Jakarta JSTL, JUnit 5, SLF4J + Logback, HikariCP. **No** Spring, JPA, Hibernate, Mockito. No other dependency without approval. **Recorded deviation DEV-1** (`docs/PROJECT_OVERVIEW.md` §6.5a): `spring-core` and `spring-jcl` arrive only as transitive dependencies of MariaDB4j; never declare or import Spring ourselves (`ArchitectureRulesTest`); they are not in the WAR. Web tests: embedded Tomcat on a random port + `java.net.http.HttpClient`.
 - **Domain:** abstract `Order`; `SwiggyOrder`, `ZomatoOrder`, `InHouseOrder` override `calculateDeliveryEstimate()` and `processPayment()`; interfaces `Trackable`, `Payable`; one kitchen station per brand; roles `ADMIN`, `KITCHEN_STAFF`.
 - **Lifecycle:** `PLACED, VALIDATED, ROUTED, PREPARING, PACKED, OUT_FOR_DELIVERY, DELIVERED, CANCELLED, FAILED`. Transitions: PLACED->VALIDATED|FAILED|CANCELLED; VALIDATED->ROUTED|CANCELLED|FAILED; ROUTED->PREPARING|CANCELLED|FAILED; PREPARING->PACKED|FAILED; PACKED->OUT_FOR_DELIVERY; OUT_FOR_DELIVERY->DELIVERED|FAILED. DELIVERED/CANCELLED/FAILED terminal. Enforced **inside the `OrderStatus` enum**. Stock restored on CANCELLED/FAILED only if the order had not reached PREPARING.
 - **Inventory:** item-level stock per station with `reorder_level`; atomic conditional `UPDATE ... SET stock_qty = stock_qty - ? WHERE ... AND stock_qty >= ?` inside the order-creation transaction; multi-item deduction in sorted `item_id` order; deadlock (SQLState 40001 / code 1213) retried up to 3 times.
@@ -87,19 +87,27 @@ Non-Java layout: `pom.xml`, `mvnw`, `mvnw.cmd`, `.mvn/wrapper/`, `config/applica
 - Commit messages end with the attribution trailer supplied by the environment. Do not put model identifiers in code, comments or docs.
 
 ## 8. Build / run / test commands
-**UNVERIFIED until Phase 1 completes.** These are the planned forms; Phase 1 must confirm or correct them and remove this banner.
+**Verified in Phase 1 on Linux only** (Ubuntu 24.04, JDK 21, Maven 3.9.16 via the wrapper, run as an unprivileged user; evidence EV-001..EV-014 in `docs/EVIDENCE.md`). The Windows forms (`mvnw.cmd`) and macOS are **not verified**, and the WAR has not been deployed on a standalone Tomcat.
 
-| Purpose | Command (Windows: `mvnw.cmd`) |
+**Prerequisites:** JDK 17+ (tested with 21), Git, a browser, internet access for the first build (Maven Central only). Nothing else is installed. **Run everything as an ordinary (non-root) operating-system user:** the embedded MariaDB server refuses to run as `root` (EV-002). The first run unpacks the MariaDB binaries (about 0.5 GB) into `data/runtime`.
+
+| Purpose | Command (Windows: `mvnw.cmd`, unverified) |
 |---|---|
-| Show Maven (wrapper) version | `./mvnw -v` |
-| Compile + run all tests | `./mvnw -q clean verify` |
-| One test class | `./mvnw -q test -Dtest=OrderStatusTest` |
-| Skip integration-tagged tests | `./mvnw -q test -DexcludedGroups=integration` |
-| Run the app (embedded Tomcat + embedded DB) | `./mvnw compile exec:java` then open `http://localhost:8080/` |
-| Build the WAR | `./mvnw -q package` (output `target/*.war`) |
-| Check WAR contents | `jar tf target/*.war` |
-| Config | copy `config/application.properties.example` to `config/application.properties` and edit (git-ignored) |
+| Show Maven (wrapper) version | `./mvnw -v` (prints Maven 3.9.16) |
+| Compile + run all tests (also builds the WAR) | `./mvnw -q clean verify` |
+| One or more test classes | `./mvnw -q test -Dtest='DbSpikeTest,EmbeddedTomcatSpikeTest'` |
+| Skip integration-tagged tests | `./mvnw -q test -DexcludedGroups=integration` (no test is tagged yet; not exercised) |
+| Run the app (embedded Tomcat + embedded DB) | `./mvnw compile exec:java`, then open `http://localhost:8080/health` (body `OK`) or `http://localhost:8080/spike.jsp` (Phase 1 spike page; there is no `/` page yet). Stop with Ctrl+C. |
+| Build the WAR | `./mvnw -q package` (output `target/*.war`; built by `verify` too) |
+| Check WAR contents | `jar tf target/*.war` (must contain JSTL, HikariCP, the driver and Logback; must not contain `tomcat-embed`, `mariaDB4j`, Spring, servlet-api) |
+| Config | copy `config/application.properties.example` to `config/application.properties` and replace **every** `CHANGE_ME...` value (the app refuses to start otherwise); the file is git-ignored |
 | Secret scan | see `docs/IMPLEMENTATION_ROADMAP.md` G-SECRET |
+
+**Ports and files:** web server `127.0.0.1:8080` (`server.port`, `0` = random; no shutdown port); embedded database `127.0.0.1:3307` (`db.embedded.port`), grants enforced, loopback only (SDD §2.3a); runtime data in git-ignored `data/` (database `data/db`, binaries `data/runtime`, Tomcat `data/tomcat`, test scratch `data/test`).
+
+**Shutdown:** Ctrl+C (SIGINT) or SIGTERM runs the shutdown hook, which stops Tomcat and then the database and logs `Embedded database stopped` / `Cloud Kitchen stopped` (exit code 130 for SIGINT, 143 for SIGTERM; verified by `LauncherShutdownSpikeTest`, Linux only). The embedded launcher sets `logbackDisableServletContainerInitializer` so that Logback keeps logging while Tomcat stops (EV-014).
+
+**Environment-specific (only when Maven cannot reach Central through a proxy, as in the cloud sandbox):** add `-Dmaven.resolver.transport=wagon -Dmaven.artifact.threads=1` to a Maven command when you see `Name or service not known` or HTTP 429 from Central; add `-U` once to retry a download that Maven cached as failed. Offline runs (`-o`) work after the first build.
 
 ## 9. Reporting a conflict (format)
 `CONFLICT: <short title>` / where (file + section) / what the docs say / what the code or reality shows / options (with consequences) / recommendation. Then wait for the user.
@@ -107,9 +115,9 @@ Non-Java layout: `pom.xml`, `mvnw`, `mvnw.cmd`, `.mvn/wrapper/`, `config/applica
 ## 10. Phase status
 | Phase | Name | Status |
 |---|---|---|
-| 0 | Documentation baseline | **Complete, frozen 2026-10-10** (commit awaiting user approval) |
-| 1 | Skeleton + zero-install spike | **Next**, not started (entry criteria in the roadmap) |
-| 2 | Domain + services (no DB) | Not started |
+| 0 | Documentation baseline | **Complete, frozen 2026-10-10**, committed `992c1fe` |
+| 1 | Skeleton + zero-install spike | **Complete** (local commit + tag `phase-1-complete`, not pushed); verified on Linux only (EV-001..EV-014), limitations in EV-013 |
+| 2 | Domain + services (no DB) | **Next**, not started (needs the user's go-ahead) |
 | 3 | Persistence | Not started |
 | 4 | Concurrent pipeline | Not started |
 | 5 | Resilience (simulator, recovery, shutdown, metrics) | Not started |
