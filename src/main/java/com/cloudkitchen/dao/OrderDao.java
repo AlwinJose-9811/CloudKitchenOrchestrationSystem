@@ -56,6 +56,9 @@ public interface OrderDao {
 
     List<Order> findNonTerminal(Connection c) throws SQLException;
 
+    /** The orphan predicate of {@link #findStaleNonTerminal} for one order, for the sweeper's fresh re-check (SDD 7.9.3 step 3.3). */
+    boolean isStaleNonTerminal(Connection c, long orderId, Duration orphanAfter) throws SQLException;
+
     List<Order> findReconcilable(Connection c, long stationId, Duration dispatchWindow, int limit) throws SQLException;
 
     // ---- durable compensation ----

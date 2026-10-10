@@ -67,6 +67,37 @@ public final class PipelineHarness implements AutoCloseable {
         return p;
     }
 
+    /**
+     * Simulates an abrupt stop of the process: the workers are stopped without draining (sleeping workers are
+     * interrupted), the queues and every in-memory set are dropped with the orchestrator, and whatever the database
+     * holds at that moment (statuses, leases, markers) stays exactly as it was.
+     */
+    public void crash() throws InterruptedException {
+        if (stopped) {
+            return;
+        }
+        stopped = true;
+        List<Thread> threads = stationThreads();
+        orch.shutdownGracefully(Duration.ZERO, Duration.ofMillis(100));
+        for (Thread t : threads) {
+            t.join(5000);
+        }
+        h.dispatcher.use(new FakeDispatchers.Accepting());
+    }
+
+    /**
+     * A new process on the same database: a fresh orchestrator with fresh queues and workers (no reset, no recovery;
+     * the test runs {@link com.cloudkitchen.pipeline.RecoveryService} itself). The stock ledger keeps the starting
+     * point of this harness so that it spans the restart.
+     */
+    public PipelineHarness restart(PipelineSettings next) throws SQLException, CloudKitchenException {
+        PipelineHarness p = new PipelineHarness(h, next, h.clock);
+        p.initialStock = initialStock;
+        h.dispatcher.use(p.orch);
+        p.orch.start(h.service, false);
+        return p;
+    }
+
     /** A worker held at one hook stage: {@code blocked} opens when it arrives, it continues when {@code release} opens. */
     public static final class Held {
         public final java.util.concurrent.CountDownLatch blocked = new java.util.concurrent.CountDownLatch(1);
@@ -132,6 +163,78 @@ public final class PipelineHarness implements AutoCloseable {
             case FAILED -> List.of(OrderStatus.VALIDATED, OrderStatus.FAILED);
         };
         return h.t.persistAt(h.t.biryaniOrder(ref), path.toArray(new OrderStatus[0]));
+    }
+
+    /**
+     * Starts the orchestrator on the data that is already in the database (no reset), for tests that created orders
+     * first, with the given starting stock for the ledger (read it with {@link #readStock} before creating the orders).
+     */
+    public static PipelineHarness attach(ServiceHarness h, PipelineSettings settings, Map<Long, Integer> startingStock)
+            throws SQLException, CloudKitchenException {
+        PipelineHarness p = new PipelineHarness(h, settings, h.clock);
+        p.initialStock = startingStock;
+        h.dispatcher.use(p.orch);
+        p.orch.start(h.service, false);
+        return p;
+    }
+
+    /** A committed {@code VALIDATED} order with its stock held and nothing queued (the submitter "died" after TX1). */
+    public long validatedWithStock(String ref) throws CloudKitchenException {
+        h.hook.set(stage -> {
+            if (stage == com.cloudkitchen.service.SubmissionHook.Stage.AFTER_TX1) {
+                throw new SimulatedCrash("after TX1");
+            }
+        });
+        try {
+            org.junit.jupiter.api.Assertions.assertThrows(SimulatedCrash.class, () -> submit(ref));
+        } finally {
+            h.hook.set(com.cloudkitchen.service.SubmissionHook.NO_OP);
+        }
+        return lastValidatedId();
+    }
+
+    /**
+     * A committed order with its stock held, moved to {@code target} by plain transitions (no worker involved).
+     * Uses whatever dispatcher is installed, so call it while the fake accepting dispatcher is active.
+     */
+    public long heldAt(String ref, OrderStatus target) throws CloudKitchenException {
+        if (target == OrderStatus.VALIDATED) {
+            return validatedWithStock(ref);
+        }
+        long id = h.service.submitOrder(h.t.request(OrderSource.SWIGGY, ref, "BIRYANI", "Chicken Biryani", 1, "Raita", 1)).orderId();
+        OrderStatus[] path = {OrderStatus.PREPARING, OrderStatus.PACKED, OrderStatus.OUT_FOR_DELIVERY};
+        OrderStatus current = OrderStatus.ROUTED;
+        for (OrderStatus next : path) {
+            if (current == target) {
+                break;
+            }
+            h.service.transition(id, current, next, "TEST", null);
+            current = next;
+        }
+        return id;
+    }
+
+    /** Down-stream failure used by the compensation tests: the restore statement fails like a lost connection. */
+    public static java.sql.SQLTransientConnectionException outage() {
+        return new java.sql.SQLTransientConnectionException("outage", "08S01", 0);
+    }
+
+    /**
+     * An order whose queue-full compensation failed: {@code VALIDATED} with a {@code PENDING} marker (attempts 1, due
+     * after the configured backoff), its stock still held. Faults are cleared and the dispatcher is the orchestrator again.
+     */
+    public long pendingOrder(String ref) throws CloudKitchenException {
+        h.dispatcher.use(new FakeDispatchers.AlwaysFull(com.cloudkitchen.exception.QueueFullException.Reason.QUEUE_FULL));
+        h.stockFaults.failAlways("restore", outage());
+        try {
+            SubmissionResult r = submit(ref);
+            assertEquals(SubmissionResult.Outcome.QUEUE_FULL, r.outcome());
+            assertFalse(r.compensated());
+            return r.orderId();
+        } finally {
+            h.stockFaults.clearFaults();
+            h.dispatcher.use(orch);
+        }
     }
 
     // ---- submissions ----

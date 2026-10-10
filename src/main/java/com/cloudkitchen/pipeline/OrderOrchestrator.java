@@ -221,6 +221,22 @@ public final class OrderOrchestrator implements OrderDispatcher {
     }
 
     /**
+     * Whether the station's worker is alive and beating, evaluated now from the task state and the heartbeat, never
+     * from a flag that a monitor set (SDD 7.9.1): it is correct even if the monitor is dead.
+     */
+    public boolean workerHealthy(StationRuntime runtime) {
+        Future<?> future = runtime.future();
+        StationWorker worker = runtime.worker();
+        return !runtime.isDead() && worker != null && (future == null || !future.isDone())
+                && worker.isHealthy(clock.millis(), cfg.stallMs());
+    }
+
+    /** The id is in the station's physical queue and its worker is healthy, so that worker will get to it (SDD 7.9.3 step 3.2). */
+    public boolean queuedOnHealthyWorker(StationRuntime runtime, long orderId) {
+        return runtime.physicalSnapshot().contains(orderId) && workerHealthy(runtime);
+    }
+
+    /**
      * Replaces the worker of one station if {@code expectedGeneration} is still current (compare-and-set under the
      * runtime lock, so concurrent repairs restart once): retires the old generation, clears its leases, starts the next
      * generation on the same queue and re-offers the orders it had leased.
@@ -319,17 +335,36 @@ public final class OrderOrchestrator implements OrderDispatcher {
     // Stop (SDD 7.6 steps 4-6; the coordinator that calls it arrives in Phase 5)
     // ------------------------------------------------------------------------------------------------------
 
+    /** How a stop ended, from the gentlest to the worst. */
+    public enum StopOutcome {
+        /** Every queue was drained and every worker ended within the drain time. */
+        DRAINED,
+        /** The drain time ran out, the workers were asked to stop and ended after their current order; queued ids stay recoverable. */
+        STOPPED,
+        /** Some worker was still busy after both waits and was interrupted ({@code shutdownNow}); its order stays recoverable. */
+        FORCED,
+        /** Some worker thread did not end even after the interrupt (a hung thread cannot be killed in Java). */
+        NOT_TERMINATED
+    }
+
+    /**
+     * {@link #stop} reduced to "did every worker thread end".
+     *
+     * @return {@code true} unless a worker thread outlived the interrupt
+     */
+    public boolean shutdownGracefully(Duration drain, Duration await) {
+        return stop(drain, await) != StopOutcome.NOT_TERMINATED;
+    }
+
     /**
      * Stops accepting new ids, lets the workers drain their queues for up to {@code drain}, then asks them to stop and
      * waits up to {@code await}, and finally interrupts what is left. Orders not finished stay non-terminal in the
-     * database and are recovered at the next start.
-     *
-     * @return {@code true} if every worker thread ended
+     * database and are recovered at the next start; the monitor is stopped first so that nothing is restarted meanwhile.
      */
-    public boolean shutdownGracefully(Duration drain, Duration await) {
+    public StopOutcome stop(Duration drain, Duration await) {
         ThreadPoolExecutor pool = executor;
         if (pool == null) {
-            return true;
+            return StopOutcome.DRAINED;
         }
         stopping = true;
         if (monitor != null) {
@@ -341,22 +376,21 @@ public final class OrderOrchestrator implements OrderDispatcher {
         }
         pool.shutdown();
         try {
-            boolean done = pool.awaitTermination(drain.toMillis(), TimeUnit.MILLISECONDS);
-            if (!done) {
-                for (StationRuntime runtime : runtimes.values()) {
-                    runtime.worker().requestStop();
-                }
-                done = pool.awaitTermination(await.toMillis(), TimeUnit.MILLISECONDS);
+            if (pool.awaitTermination(drain.toMillis(), TimeUnit.MILLISECONDS)) {
+                return StopOutcome.DRAINED;
             }
-            if (!done) {
-                pool.shutdownNow();
-                done = pool.awaitTermination(2, TimeUnit.SECONDS);
+            for (StationRuntime runtime : runtimes.values()) {
+                runtime.worker().requestStop();
             }
-            return done;
+            if (pool.awaitTermination(await.toMillis(), TimeUnit.MILLISECONDS)) {
+                return StopOutcome.STOPPED;
+            }
+            pool.shutdownNow();
+            return pool.awaitTermination(2, TimeUnit.SECONDS) ? StopOutcome.FORCED : StopOutcome.NOT_TERMINATED;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             pool.shutdownNow();
-            return false;
+            return StopOutcome.NOT_TERMINATED;
         } finally {
             for (StationRuntime runtime : runtimes.values()) {
                 runtime.close();

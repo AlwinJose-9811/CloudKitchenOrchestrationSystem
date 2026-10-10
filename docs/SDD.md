@@ -1710,6 +1710,59 @@ This section records what the Phase 4 code does; it adds no requirement. Everyth
 * A pending lease reclaim that fails during `restartWorker` is logged and the restart goes ahead; the old owner's leases then expire by time and the next reconcile pass recovers the orders (`WorkerMonitorTest`).
 * A status step whose reply is lost after the commit is recognised on the retry (zero rows, status already advanced, same epoch) and the worker continues; the only visible effect is that the event and metric of that one step are not emitted (`LostReplyIdempotenceTest`).
 
+### 7.15 Phase 5 implementation record: recovery, simulator, sweeper, shutdown and wiring (2026-10-10)
+
+This section records what the Phase 5 code does; it adds no requirement. Proof: `docs/EVIDENCE.md` EV-032..EV-038.
+
+#### 7.15.1 Classes and thread ownership (additions to 7.1 and 7.14.2)
+
+| Component | Created and owned by | Thread | State and guard | Database connection / transaction |
+|---|---|---|---|---|
+| `AppContext` | `AppBootstrapListener` (and tests); builds everything in the order of 2.4 | the caller of `create`; `close()` may be called from any thread | immutable references plus a `CountDownLatch ready` | creates the pool; no connection of its own |
+| `RecoveryService` | `AppContext` | `recovery-loader` (one thread, ends when done or interrupted) | `volatile recovering`, `AtomicLong` stats, `CountDownLatch done` | every step is an `OrderService` call (own pooled connection, own transaction) |
+| `FeedSimulator` | `AppContext` | `feed-simulator` (single-thread `ScheduledExecutorService`, created at construction, no thread until the first `start`) | `volatile running/ratePerMinute`; `start`/`setRate` `synchronized`; `tickLock` makes `stop()` wait for a running tick; `AtomicLong` stats | one `OrderService.submitOrder` per tick |
+| `OrphanSweeper` | `AppContext`, started by the recovery thread after recovery | `reconcile-scheduler` (single-thread scheduler, `scheduleWithFixedDelay`) | `AtomicLong` stats, `volatile lastPassAt` | reads and the standard compensation transaction through `OrderService`; its only queue effect is `offerNow` |
+| `ShutdownCoordinator` | `AppContext` | none of its own except the optional JVM hook `ck-shutdown-hook`; runs on the first caller's thread | `AtomicBoolean started`, `CountDownLatch done`, `volatile outcome` | none |
+| `DashboardService` | `AppContext` | request threads | none; every part is read once and copied | `OrderQueryService`, `StockService` calls (own connections) |
+
+#### 7.15.2 Recovery protocol as implemented (`RecoveryService.recover`)
+
+1. `SnapshotStep.run()`: a no-op hook until Phase 6 (it will insert orders that a verified snapshot holds and the database lacks).
+2. `OrderService.clearAllLeases()`: every lease cleared, every fencing epoch kept (an owner of the previous run can never write, and no worker of this run is processing yet because `accepting` is false).
+3. For every pending compensation (ignoring its backoff time) one `completePendingCompensation` round: success counts as resolved, failure keeps the marker and records the attempt (the sweeper keeps retrying).
+4. `findRecoverableOrders()` (non-terminal, not pending, **oldest id first**, RR-9) and for each order `reenqueueOrFail`: a station without a runtime means `FAILED` with note `STATION_UNAVAILABLE` (stock restored only from `VALIDATED`/`ROUTED`; a `PACKED` order has no edge to `FAILED`, stays as it is and is counted as skipped); otherwise `tryEnqueue(id, 500 ms)` in a loop that ends when the id is queued, the station is `DEAD` (the order stays in the database for an operator restart; it is counted as skipped) or the orchestrator is stopping. A saturated queue therefore makes recovery wait for the worker; it never drops an id and never blocks forever on a dead station. An interrupt ends recovery with the flag restored; the remaining orders stay in the database for the next start.
+5. `AppContext` then starts the sweeper, sets `accepting = true` (a submission before that returns `STARTING_UP`), starts the simulator if `simulator.autostart` is set, and opens the readiness latch.
+
+Orders are **not** processed in status order: the frozen design (RR-9, 7.10.6) enqueues oldest id first, and a `VALIDATED` order is routed by the worker that dequeues it (RR-3) with the same fenced transition as any other step. Enqueuing is not a side effect: a repeated recovery, a duplicate entry or the monitor's reconcile pass running at the same time cannot cause a second deduction, a second terminal edge or a second restore (`RecoveryServiceTest`, `RoutingCrashWindowTest`, `CrashRecoveryTest`). Recovery clears leases only because it runs before `accepting`; it is not a repair mechanism for a live system (that is `repairStation`, 7.13).
+
+#### 7.15.3 Shutdown lifecycle as implemented
+
+`ShutdownCoordinator.shutdown()` is called by `AppContext.close()` (the servlet listener's `contextDestroyed`) and by the JVM hook that `AppContext` installs; the embedded `Launcher` keeps its own hook, which stops Tomcat and therefore ends in the same `close()`. The first caller runs the steps in this order, each in its own try/catch:
+
+| # | Step | What it does |
+|---|---|---|
+| 1 | stop accepting orders | `OrderService.setAccepting(false)`: later submissions return `SHUTTING_DOWN` |
+| 2 | stop the feed simulator | cancel the schedule, wait for a running tick, `shutdownNow`, bounded wait (flag restored) |
+| 3 | stop the sweeper and the worker monitor | so that nothing is restarted or re-enqueued while draining |
+| 4 | drain and stop the workers | `OrderOrchestrator.stop(drain, await)`: workers finish the queues for up to `shutdown.drain.seconds` (outcome `DRAINED`); then they are asked to stop after their current order and given `shutdown.await.seconds` (`STOPPED`); then `shutdownNow` interrupts them and waits 2 s more (`FORCED`, or `NOT_TERMINATED` for a thread that ignores the interrupt). The outcome is logged and recorded as the step's note. Unfinished orders stay in their database status (`DB is the source of truth`) |
+| 5 | (Phase 6) final snapshot | not yet present |
+| 6 | close the connection pool | after the workers, so no worker is cut off from the database |
+| 7 | close the event log | |
+| 8 | stop the embedded database | only if `AppContext` was given a resource it owns; the embedded `Launcher` stops its own database after Tomcat |
+
+Every other caller blocks on the `done` latch for at most `drain + await + 10 s` and returns `false` if the first caller is still running (or if it was interrupted while waiting). If the thread running the steps is interrupted, the flag is cleared between steps so that the pool and the files are still closed, and it is set again before `shutdown()` returns. Bound: `drain + await + 2 s` for step 4 plus the other steps (each bounded by 5 s); NFR-REL-03 allows `drain + await + 5 s`. Shutdown does **not** complete every order: what is unfinished is recovered by the next start.
+
+#### 7.15.4 Metrics
+
+`MetricsRegistry` is unchanged and remains the only home of the five locked counters. `submitted` counts every `submitOrder` call; `rejected` counts submissions that created no order (validation, stock, duplicate, temporary failure, starting up, shutting down); `failed` counts orders that reached `FAILED` (queue-full compensation, processing error, station unavailable, operator retry); `processed` counts `DELIVERED` steps won by a worker; average processing time is measured from the worker's successful claim to `DELIVERED` and is 0 when there is no sample. Each is incremented once per logical event, after the commit and only by the caller whose conditional update changed the row, never per retry, per queue entry or per lost reply (a lost reply loses that one increment, 7.14.4). Cancelled and in-flight orders are not counters; they are counted from the database, which is how the invariant `submitted = rejected + processed + failed + cancelled + inFlight` is checked at quiescence (`MetricsInvariantTest`). Recovery, the sweeper and the simulator keep their own immutable `Stats` records (`RecoveryService.Stats`, `OrphanSweeper.Stats`, `FeedSimulator.Stats`); they are not metrics of the locked set and no concept is counted in two places. All counters are process-local and reset at restart (nothing is persisted). `DashboardService.snapshot()` assembles an immutable `DashboardView` (counts by status, low stock, one `StationView` per station with queue size and capacity, worker state and processed count, the metrics, simulator and recovery state, pending compensations); each part is read once, so counters keep moving between the reads.
+
+#### 7.15.5 Clarifications made while implementing (decisions D-053..D-059 in `PROJECT_OVERVIEW.md` 6.5)
+
+* The brief's `OrderFeedSimulator` and `Metrics` are the frozen `FeedSimulator` and `MetricsRegistry`.
+* `DashboardService` receives the pipeline parts as suppliers, because `ArchitectureRulesTest` allows package `service` only three pipeline types.
+* `OrderService` gained the recovery and sweeper reads, `OrderDao` gained `isStaleNonTerminal` for the sweeper's fresh re-check (7.9.3 step 3.3).
+* `AppContext` still wires `NoOpOrderEventLog` and the no-op snapshot step; Phase 6 replaces them.
+
 ---
 
 ## 8. File handling design

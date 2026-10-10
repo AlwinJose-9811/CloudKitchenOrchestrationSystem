@@ -21,6 +21,7 @@ import com.cloudkitchen.dto.FencingToken;
 import com.cloudkitchen.dto.OrderItemRequest;
 import com.cloudkitchen.dto.OrderProgress;
 import com.cloudkitchen.dto.OrderRequest;
+import com.cloudkitchen.dto.RecoverableOrder;
 import com.cloudkitchen.dto.SessionUser;
 import com.cloudkitchen.dto.SubmissionResult;
 import com.cloudkitchen.dto.ValidationResult;
@@ -623,6 +624,49 @@ public final class OrderService {
     public List<Long> findReconcilableIds(long stationId, Duration dispatchWindow, int limit) throws CloudKitchenException {
         return database.withConnection(c -> orders.findReconcilable(c, stationId, dispatchWindow, limit)).stream()
                 .map(Order::getId).toList();
+    }
+
+    // ------------------------------------------------------------------------------------------------------
+    // Recovery and sweeper reads (SDD 7.9, 7.10.6): pure reads, the DAO queries stay behind the service
+    // ------------------------------------------------------------------------------------------------------
+
+    /** Every non-terminal order that is not awaiting compensation, oldest id first (RR-9, 7.10.6 step 4). */
+    public List<RecoverableOrder> findRecoverableOrders() throws CloudKitchenException {
+        return recoverable(database.withConnection(orders::findNonTerminalForProcessing));
+    }
+
+    /** Ids of all orders awaiting compensation, regardless of their backoff time (startup resolves them first). */
+    public List<Long> findPendingCompensationIds() throws CloudKitchenException {
+        return database.withConnection(orders::findAllPendingCompensations).stream().map(Order::getId).toList();
+    }
+
+    /** Ids of the pending compensations whose backoff has elapsed, oldest first (the sweeper's step 1). */
+    public List<Long> findDuePendingCompensationIds(int limit) throws CloudKitchenException {
+        return database.withConnection(c -> orders.findDuePendingCompensations(c, limit)).stream().map(Order::getId).toList();
+    }
+
+    /** Orders untouched for {@code orphanAfter}, without a valid lease and not pending (the sweeper's candidates). */
+    public List<RecoverableOrder> findStaleOrders(Duration orphanAfter, int limit) throws CloudKitchenException {
+        return recoverable(database.withConnection(c -> orders.findStaleNonTerminal(c, orphanAfter, limit)));
+    }
+
+    /** Fresh re-check just before a re-enqueue: the order still satisfies the orphan predicate. */
+    public boolean isStale(long orderId, Duration orphanAfter) throws CloudKitchenException {
+        return Boolean.TRUE.equals(database.withConnection(c -> orders.isStaleNonTerminal(c, orderId, orphanAfter)));
+    }
+
+    /** Count and age (seconds) of the oldest order awaiting compensation, for the dashboard; (0, 0) if none. */
+    public long[] pendingCompensationSummary() throws CloudKitchenException {
+        List<Order> pending = database.withConnection(orders::findAllPendingCompensations);
+        if (pending.isEmpty()) {
+            return new long[] {0, 0};
+        }
+        Instant oldest = pending.stream().map(Order::getCreatedAt).min(Comparator.naturalOrder()).orElseThrow();
+        return new long[] {pending.size(), Math.max(0, Duration.between(oldest, clock.instant()).toSeconds())};
+    }
+
+    private static List<RecoverableOrder> recoverable(List<Order> found) {
+        return found.stream().map(o -> new RecoverableOrder(o.getId(), o.getBrandCode(), o.getStatus())).toList();
     }
 
     // ------------------------------------------------------------------------------------------------------

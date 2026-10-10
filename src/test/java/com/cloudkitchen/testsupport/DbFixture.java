@@ -36,7 +36,10 @@ public final class DbFixture implements AutoCloseable {
     private final Database database;
     private final Clock clock;
 
-    private DbFixture(AppConfig config, HikariDataSource pool, Database database, Clock clock) {
+    private final Properties properties;
+
+    private DbFixture(Properties properties, AppConfig config, HikariDataSource pool, Database database, Clock clock) {
+        this.properties = properties;
         this.config = config;
         this.pool = pool;
         this.database = database;
@@ -58,7 +61,7 @@ public final class DbFixture implements AutoCloseable {
         dropAllTables(pool);
         Database database = new Database(pool, clock, config.txRetryMax(), config.txRetryBackoffMs());
         new SchemaInitializer(database, clock).apply();
-        DbFixture fixture = new DbFixture(config, pool, database, clock);
+        DbFixture fixture = new DbFixture(props, config, pool, database, clock);
         fixture.rememberSeed();
         return fixture;
     }
@@ -134,6 +137,18 @@ public final class DbFixture implements AutoCloseable {
 
     public AppConfig config() {
         return config;
+    }
+
+    /** A copy of the properties of this fixture's configuration (database coordinates and secrets of the test server). */
+    public Properties properties() {
+        Properties copy = new Properties();
+        copy.putAll(properties);
+        return copy;
+    }
+
+    /** The JDBC URL of the shared test server, for building an {@code AppContext} on the same database. */
+    public String jdbcUrl() {
+        return DataSourceFactory.embeddedUrl("127.0.0.1", settings.port(), settings.database());
     }
 
     public HikariDataSource pool() {

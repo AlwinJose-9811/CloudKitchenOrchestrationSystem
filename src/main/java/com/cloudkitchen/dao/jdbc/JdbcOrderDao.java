@@ -176,6 +176,20 @@ public final class JdbcOrderDao implements OrderDao {
     }
 
     @Override
+    public boolean isStaleNonTerminal(Connection c, long orderId, Duration orphanAfter) throws SQLException {
+        Instant now = LeaseStampContext.freshNow(clock, hook);
+        try (PreparedStatement p = c.prepareStatement("SELECT 1 FROM orders o WHERE o.id = ? AND o.status IN (" + NON_TERMINAL
+                + ") AND o.updated_at < ? AND " + NOT_PENDING + " AND (o.lease_expires_at IS NULL OR o.lease_expires_at <= ?)")) {
+            p.setLong(1, orderId);
+            Sql.setTime(p, 2, now.minus(orphanAfter));
+            Sql.setTime(p, 3, now);
+            try (ResultSet rs = p.executeQuery()) {
+                return rs.next();
+            }
+        }
+    }
+
+    @Override
     public List<Order> findNonTerminalForProcessing(Connection c) throws SQLException {
         return query(c, SELECT_ORDER + " WHERE o.status IN (" + NON_TERMINAL + ") AND " + NOT_PENDING + " ORDER BY o.id", p -> { }, false);
     }

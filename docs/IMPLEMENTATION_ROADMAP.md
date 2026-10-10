@@ -247,24 +247,24 @@ Plus G-SECRET, G-TREE, G-TAG (`phase-4-complete`).
 **Depends on:** Phase 4.
 
 ### Tasks
-- [ ] 5.1 `pipeline.FeedSimulator` (`start`, `stop`, `setRate`, `isRunning`, `produced`).
-- [ ] 5.2 `pipeline.RecoveryService` with the **startup order of SDD §7.10.6**: snapshot insert of missing orders, clear all leases, resolve pending compensations, then reload non-terminal orders excluding `PENDING`, enqueue oldest first with blocking put on `recovery-loader`; snapshot writer excludes pending orders (hook for Phase 6).
-- [ ] 5.3 `pipeline.ShutdownCoordinator` (ordered idempotent steps, JVM hook, drain + `awaitTermination` + `shutdownNow`), orchestrator `shutdownGracefully`.
-- [ ] 5.4 `bootstrap.AppContext` (full manual wiring per [SDD §2.4](SDD.md), start/close, recovery latch, `accepting` handling). `Launcher` remains the Phase 1 spike launcher.
-- [ ] 5.5 `MetricsRegistry` finalised and invariant checked; `DashboardService` data side (`stationViews`, metrics view) available.
-- [ ] 5.6 Tests: `FeedSimulatorTest`, `RecoveryServiceTest`, `ResumableProcessingTest`, `RoutingCrashWindowTest`, `ShutdownCoordinatorTest`, `GracefulShutdownTest`, `MetricsInvariantTest`.
-- [ ] 5.7 Recovery per RR-9 (missing station -> FAILED `STATION_UNAVAILABLE`), shared helper `RecoveryService.reenqueueOrFail`.
-- [ ] 5.8 `pipeline.OrphanSweeper` per [SDD §7.9](SDD.md) (approved, lease-based): DB lease proof (not `activeIds`), `queuedOnHealthyWorker`, durable pending-compensation retries with backoff and `COMPENSATION_STUCK`, configurable schedule keys and `AppConfig` cross-validation, started after recovery, stopped first at shutdown together with `WorkerMonitor`. Role: coarse backstop behind the monitor's reconcile pass (SDD §7.9 intro); decisions use the DB lease and the physical queue, never `activeIds`.
-- [ ] 5.9 Tests: `OrphanSweeperTest`, `OrphanSweeperRaceTest`, `CompensationPendingSweepTest`, `PendingCompensationRestartTest`, `CompensationBackoffTest`, `CompensationOperatorTest`, `MonitorDeathSweeperRecoveryTest`.
-- [ ] 5.10 `OrderService.retryCompensation(orderId, SessionUser admin)` per [SDD §7.10.11](SDD.md) (ADMIN-only, TX4, history actor `admin:<username>`, note `COMPENSATION_MANUAL`, idempotent, no bypass) and `cancelOrder` refusal for PENDING orders.
+- [x] 5.1 `pipeline.FeedSimulator` (`start`, `stop`, `setRate`, `isRunning`, `produced`). **Done (EV-034):** `FeedSimulator` (`start`, `stop`, `setRate`, `isRunning`, `getRate`, `produced`, `stats`, `shutdown`) with an injectable `OrderGenerator`, `Clock` and `Random`.
+- [x] 5.2 `pipeline.RecoveryService` with the **startup order of SDD §7.10.6**: snapshot insert of missing orders, clear all leases, resolve pending compensations, then reload non-terminal orders excluding `PENDING`, enqueue oldest first with blocking put on `recovery-loader`; snapshot writer excludes pending orders (hook for Phase 6). **Done (EV-032, EV-033):** `RecoveryService` with the 7.10.6 order; the snapshot step is a no-op hook until Phase 6 (`SnapshotStep.NONE`); the writer-side exclusion of pending orders belongs to Phase 6.
+- [x] 5.3 `pipeline.ShutdownCoordinator` (ordered idempotent steps, JVM hook, drain + `awaitTermination` + `shutdownNow`), orchestrator `shutdownGracefully`. **Done (EV-035):** `ShutdownCoordinator` (ordered, idempotent, JVM hook) and `OrderOrchestrator.stop` / `shutdownGracefully` with `StopOutcome`.
+- [x] 5.4 `bootstrap.AppContext` (full manual wiring per [SDD §2.4](SDD.md), start/close, recovery latch, `accepting` handling). `Launcher` remains the Phase 1 spike launcher. **Done (EV-035):** `AppContext` full wiring, recovery latch, `accepting` handling; the event log and snapshot are wired as no-ops until Phase 6; `Launcher` is unchanged.
+- [x] 5.5 `MetricsRegistry` finalised and invariant checked; `DashboardService` data side (`stationViews`, metrics view) available. **Done (EV-036):** `MetricsRegistry` unchanged and checked by `MetricsInvariantTest`; `DashboardService.snapshot()` is the data side.
+- [x] 5.6 Tests: `FeedSimulatorTest`, `RecoveryServiceTest`, `ResumableProcessingTest`, `RoutingCrashWindowTest`, `ShutdownCoordinatorTest`, `GracefulShutdownTest`, `MetricsInvariantTest`. **Done:** all seven classes exist and pass (`LauncherSmokeTest` of FR-RES-04 is not in this list and does not exist).
+- [x] 5.7 Recovery per RR-9 (missing station -> FAILED `STATION_UNAVAILABLE`), shared helper `RecoveryService.reenqueueOrFail`. **Done (EV-032):** `RecoveryService.reenqueueOrFail`; see D-059 for `PACKED` and `DEAD` stations.
+- [x] 5.8 `pipeline.OrphanSweeper` per [SDD §7.9](SDD.md) (approved, lease-based): DB lease proof (not `activeIds`), `queuedOnHealthyWorker`, durable pending-compensation retries with backoff and `COMPENSATION_STUCK`, configurable schedule keys and `AppConfig` cross-validation, started after recovery, stopped first at shutdown together with `WorkerMonitor`. Role: coarse backstop behind the monitor's reconcile pass (SDD §7.9 intro); decisions use the DB lease and the physical queue, never `activeIds`. **Done (EV-037):** `OrphanSweeper` with `Settings`, `Stats`, `runOnce`; `AppConfig` cross-validation already existed from Phase 3.
+- [x] 5.9 Tests: `OrphanSweeperTest`, `OrphanSweeperRaceTest`, `CompensationPendingSweepTest`, `PendingCompensationRestartTest`, `CompensationBackoffTest`, `CompensationOperatorTest`, `MonitorDeathSweeperRecoveryTest`. **Done (EV-037, EV-038):** all seven classes exist and pass.
+- [x] 5.10 `OrderService.retryCompensation(orderId, SessionUser admin)` per [SDD §7.10.11](SDD.md) (ADMIN-only, TX4, history actor `admin:<username>`, note `COMPENSATION_MANUAL`, idempotent, no bypass) and `cancelOrder` refusal for PENDING orders. **Done:** `retryCompensation` and the `cancelOrder` refusal exist since Phase 3; Phase 5 adds `CompensationOperatorTest` (EV-038).
 
 ### Exit criteria
-- [ ] Recovery after abrupt stop proven (orders in every non-terminal status complete after restart), including simulated crashes after TX1, after `offer`, after ROUTED and during compensation, with stock deducted/restored exactly once.
-- [ ] With the worker monitor stopped, one sweeper pass restarts a killed worker (once, compare-and-set on the generation) and recovers the lost id (`MonitorDeathSweeperRecoveryTest`).
-- [ ] Sweeper never re-enqueues queued/active/paused/parked/fresh/pending-compensation orders, never causes a duplicate edge or double restore (`OrphanSweeperRaceTest` 20/20).
-- [ ] Shutdown triggered twice runs once; bounded by configured timeouts; no leaked threads.
-- [ ] Metrics invariant holds at quiescence.
-- [ ] Three consecutive full builds green; concurrency tests 20/20.
+- [x] Recovery after abrupt stop proven (orders in every non-terminal status complete after restart), including simulated crashes after TX1, after `offer`, after ROUTED and during compensation, with stock deducted/restored exactly once. **Met (EV-033).**
+- [x] With the worker monitor stopped, one sweeper pass restarts a killed worker (once, compare-and-set on the generation) and recovers the lost id (`MonitorDeathSweeperRecoveryTest`). **Met (EV-037).**
+- [x] Sweeper never re-enqueues queued/active/paused/parked/fresh/pending-compensation orders, never causes a duplicate edge or double restore (`OrphanSweeperRaceTest` 20/20). **Met (EV-037).**
+- [x] Shutdown triggered twice runs once; bounded by configured timeouts; no leaked threads. **Met (EV-035).**
+- [x] Metrics invariant holds at quiescence. **Met (EV-036).**
+- [x] Three consecutive full builds green; concurrency tests 20/20. **Met (EV-039).**
 
 ### Gate commands
 ```
@@ -394,7 +394,7 @@ Plus G-SECRET, G-TREE, G-TAG.
 - [x] Phase 2 Domain + services (no DB) (local commit and tag `phase-2-complete`, not pushed)
 - [x] Phase 3 Persistence (local commit and tag `phase-3-complete`, not pushed; MySQL 8 unverified)
 - [x] Phase 4 Concurrent pipeline (local commit and tag `phase-4-complete`, not pushed; one scenario bullet and the sweeper/recovery/restart parts remain for Phase 5; Linux and MariaDB only)
-- [ ] Phase 5 Resilience
+- [x] Phase 5 Resilience (local commit and tag `phase-5-complete`, not pushed; MariaDB and Linux only; snapshots and the file log are Phase 6)
 - [ ] Phase 6 File handling + serialization
 - [ ] Phase 7 Web layer
 - [ ] Phase 8 Integration audit + Review 2 pack
