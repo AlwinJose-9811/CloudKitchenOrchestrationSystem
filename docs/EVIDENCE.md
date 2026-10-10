@@ -1,6 +1,6 @@
 # Evidence Log
 
-**Status:** Phase 1 in progress. Entries EV-001..EV-014 record the Phase 1 work: wrapper, embedded database and its security, JDBC behaviour, embedded Tomcat, WAR, shutdown, and the full verification. Nothing else has been run, so nothing else is evidence. Phase 1 is committed locally and tagged `phase-1-complete` (not pushed) with the limitations listed in EV-013.
+**Status:** Phase 1 in progress. Entries EV-001..EV-015 record the Phase 1 work: wrapper, embedded database and its security, JDBC behaviour, embedded Tomcat, WAR, shutdown, and the full verification. Nothing else has been run, so nothing else is evidence. Phase 1 is committed locally and tagged `phase-1-complete` (not pushed) with the limitations listed in EV-013.
 
 **Rules**
 1. This file is the **only** proof that something works. A requirement, test, phase or concept may be called *done* / *passed* only if a matching entry exists below.
@@ -30,6 +30,7 @@
 | EV-012 | 1 | `./mvnw compile exec:java` + SIGINT | Passed (log-visibility limitation noted) | 2026-10-10 | FR-ENV-01, S-14 | Phase 1 commit |
 | EV-013 | 1 | `./mvnw clean verify` and the roadmap gate commands | Passed (final run recorded in EV-013) | 2026-10-10 | all Phase 1 requirements (Linux only) | Phase 1 commit |
 | EV-014 | 1 | `LauncherShutdownSpikeTest` (SIGTERM to the real launcher) | Passed after root cause fixed | 2026-10-10 | FR-ENV-01, S-14 | Phase 1 commit |
+| EV-015 | 1 | three consecutive `./mvnw -q clean verify` on a clean extraction of `524256d`, WAR/secret/Mockito checks, clean-tree `exec:java` | Passed (88 tests x 3) | 2026-10-10 | FR-ENV-01 (part), FR-ENV-03, NFR-SEC-01, NFR-TST-01 | 524256d |
 
 (Add one row per entry below, newest last.)
 
@@ -193,6 +194,18 @@ All entries: 2026-10-10, Linux 6.18.44 (Ubuntu 24.04.5), OpenJDK 21.0.12.1, work
 - Two harness errors of mine on the way, kept for honesty: my first version of the test read the child's output through a pipe, and Java closes the pipe when the child exits (`IOException: Stream closed` in the reader), which loses the last lines; the test now redirects the child's output to a file. An experiment of mine also signalled the wrapping `sh` instead of the JVM (`pgrep -f` matched the shell) and was discarded.
 - Ctrl+C itself (SIGINT) was exercised by hand in EV-012; the automated test uses SIGTERM because Java has no portable way to send SIGINT. Both run the same JVM shutdown hooks.
 - Not verified: Windows.
+
+### EV-015  Phase 1: traceability closure, verification on the committed tree
+- Supports: FR-ENV-01 (Phase 1 part only), FR-ENV-03, NFR-SEC-01, NFR-PORT-01, NFR-MNT-02, NFR-TST-01 (see TRACEABILITY.md "Phase 1 closure notes").
+- Starting state checked first: branch `claude/cloud-kitchen-orchestration-7d1aok`, `HEAD` = `524256d2f91f32b84bef714a7e570fc624bdc59a` is the Phase 1 commit, annotated tag `phase-1-complete` dereferences to the same commit, working tree clean, branch ahead of `origin` by exactly that one commit, no `phase-1` tag on the remote (nothing pushed).
+- Method: `git archive 524256d2f91f32b84bef714a7e570fc624bdc59a | tar -x -C data/verify-524256d` (58 files, committed content only: no `config/application.properties`, no `data/`, no `target/`), owned by the unprivileged user `claude`; all Maven runs as `claude`, `HOME=/home/claude`, `-o -Dmaven.resolver.transport=wagon -Dmaven.artifact.threads=1` (dependencies were cached by earlier online runs).
+- Three consecutive runs of `./mvnw ... -q clean verify` in that directory (UTC): run 1 11:03:26 to 11:04:44, exit 0; run 2 11:04:44 to 11:06:19, exit 0; run 3 11:06:19 to 11:07:27, exit 0. Each run read from the surefire XML reports: `tests=88 failures=0 errors=0 skipped=0`.
+- WAR built from the committed tree (8,685,494 bytes): `WEB-INF/web.xml` 1, `spike.jsp` 1, `WEB-INF/classes/com/cloudkitchen/` 52 entries, `HikariCP-` 1, `mysql-connector-j-` 1, `slf4j-api-` 1, `logback-classic-` 1, `jakarta.servlet.jsp.jstl-3` (implementation) 1, `jakarta.servlet.jsp.jstl-api` 1; entries matching `tomcat-embed|mariadb4j`: 0; matching `spring|jasper|servlet-api|el-api|ecj-`: 0.
+- NFR-SEC-01 on the commit: `git ls-files | grep -E '^(data|logs|snapshots|reports)/|^config/application\.properties$'` printed nothing; `git ls-files config` printed only `config/application.properties.example`; `git grep -nIE '(password|secret)[[:space:]]*[:=][[:space:]]*"[^"]+"' 524256d -- src/main` printed nothing; the four secret keys in the committed example are `CHANGE_ME...`; `git check-ignore` confirms `config/application.properties`, `data/db`, `logs/orders.log`, `snapshots/x.ser`, `reports/daily.csv`, `target/x.war` are ignored; `git ls-tree -r --name-only 524256d` lists no `.jar .war .zip .class .log .ser` file.
+- NFR-TST-01 on the commit: the test class path of the clean run has 36 jars, none of `mockito`, `byte-buddy`, `objenesis`, `h2`, `hibernate`, `jakarta.persistence`; `pom.xml` mentions Mockito 0 times; the only two `mockito` strings under `src` are in `ArchitectureRulesTest`, where they are the rule that forbids it; `@RepeatedTest(20)` appears on the two concurrency tests (S-10, S-19).
+- Clean-tree `exec:java` (config created by copying the committed example and replacing every `CHANGE_ME` with generated values, as `CLAUDE.md` section 8 says): `./mvnw -o ... compile exec:java` logged `Cloud Kitchen is up`; `GET /health` returned `OK` with HTTP 200; `GET /spike.jsp?name=<b>x</b>` returned HTTP 200 with `c:out says: &lt;b&gt;x&lt;/b&gt;`; **`GET /login` returned HTTP 404** (no login page exists before Phase 7); SIGTERM produced `[ck-shutdown-hook] DbBootstrap - Embedded database stopped` and `[ck-shutdown-hook] Launcher - Cloud Kitchen stopped`, exit code 143, no `java` or `mariadbd` process left.
+- Decision per row (details and limitations in TRACEABILITY.md): Done for FR-ENV-03, NFR-SEC-01, NFR-PORT-01 (Linux only), NFR-MNT-02, NFR-TST-01; FR-ENV-01 and FR-ENV-02 left In progress because their acceptance criteria name `/login` (Phase 7), stored orders (Phase 3) and `LauncherSmokeTest` (Phase 8), which do not exist.
+- Not verified here: Windows, macOS, standalone Tomcat 10.1 deployment. Scratch directory `data/verify-524256d` (git-ignored) was left in place and not deleted.
 
 ### Phase 2: Domain + services (no DB)
 (no entries yet)
