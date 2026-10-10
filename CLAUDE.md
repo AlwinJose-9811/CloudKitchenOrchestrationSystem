@@ -2,7 +2,7 @@
 
 Read this file at the start of **every** session. It is short on purpose; the details live in `docs/`.
 
-**Current status:** Phase 0 (documentation baseline) is **complete, frozen and committed** (2026-10-10, commit `992c1fe`). Phase 1 (skeleton + zero-install spike) is **complete**: one local commit tagged `phase-1-complete` holds the code, tests and evidence (see `docs/EVIDENCE.md`); nothing has been pushed, and Windows, macOS and standalone Tomcat remain unverified. Phase 2 (domain and services, no database) is **complete**: one local commit tagged `phase-2-complete` holds the code, tests and evidence (`docs/EVIDENCE.md` EV-016..EV-019); nothing has been pushed. Phase 3 has not started and needs the user's explicit go-ahead. The skeleton, the spikes, the pure domain and service logic (orders, lifecycle enum, validator, routing, password hashing, lockout policy, registries, full `AppConfig`) and the DAO **interfaces** exist; **no schema SQL, JDBC implementation, `OrderService`, worker/queue code or web layer exists.** Do not claim anything else is implemented. The active phase is recorded in the table at the end of this file.
+**Current status:** Phase 0 (documentation baseline) is **complete, frozen and committed** (2026-10-10, commit `992c1fe`). Phase 1 (skeleton + zero-install spike) is **complete**: one local commit tagged `phase-1-complete` holds the code, tests and evidence (see `docs/EVIDENCE.md`); nothing has been pushed, and Windows, macOS and standalone Tomcat remain unverified. Phase 2 (domain and services, no database) is **complete**: one local commit tagged `phase-2-complete` holds the code, tests and evidence (`docs/EVIDENCE.md` EV-016..EV-019); nothing has been pushed. Phase 3 (persistence) is **complete**: one local commit tagged `phase-3-complete` holds the code, tests and evidence (`docs/EVIDENCE.md` EV-020..EV-025); nothing has been pushed; real MySQL 8 compatibility is **unverified** (only MariaDB was available). Phase 4 has not started and needs the user's explicit go-ahead. Implemented: the skeleton, the pure domain and services, the versioned schema and seed (`V001`/`V002` applied by `SchemaInitializer`), `Database` with deadlock retry, six JDBC DAOs (including lease, fencing and compensation statements), `OrderService`, `AuthService`, `MenuService`, `StockService`, `OrderQueryService`, `UserSeeder`, the application context and a temporary read-only page `GET /demo/orders`. **No station queue, worker, orchestrator, sweeper, monitor, simulator, file log, snapshot, login flow or other web page exists.** Do not claim anything else is implemented. The active phase is recorded in the table at the end of this file.
 
 ## 1. What this project is
 A Java web app (Servlets + JSP + JDBC + MySQL-compatible DB, Tomcat 10.1) for an undergraduate project, built by one developer with Claude Code across several sessions. It accepts simulated orders from Swiggy, Zomato and an in-house app, validates them, routes each to its brand's kitchen station, processes them concurrently, tracks the lifecycle and persists everything.
@@ -97,10 +97,10 @@ Non-Java layout: `pom.xml`, `mvnw`, `mvnw.cmd`, `.mvn/wrapper/`, `config/applica
 | Compile + run all tests (also builds the WAR) | `./mvnw -q clean verify` |
 | One or more test classes | `./mvnw -q test -Dtest='DbSpikeTest,EmbeddedTomcatSpikeTest'` |
 | Skip integration-tagged tests | `./mvnw -q test -DexcludedGroups=integration` (no test is tagged yet; not exercised) |
-| Run the app (embedded Tomcat + embedded DB) | `./mvnw compile exec:java`, then open `http://localhost:8080/health` (body `OK`) or `http://localhost:8080/spike.jsp` (Phase 1 spike page; there is no `/` page yet). Stop with Ctrl+C. |
+| Run the app (embedded Tomcat + embedded DB) | `./mvnw compile exec:java`, then open `http://localhost:8080/health` (body `OK`), `http://localhost:8080/demo/orders` (read-only order list from the database, Phase 3) or `http://localhost:8080/spike.jsp` (Phase 1 spike page; there is no `/` page yet). The first start creates the schema, the reference data and the two accounts from `bootstrap.*` in the config file (all four values are required while the user table is empty). Stop with Ctrl+C. |
 | Build the WAR | `./mvnw -q package` (output `target/*.war`; built by `verify` too) |
 | Check WAR contents | `jar tf target/*.war` (must contain JSTL, HikariCP, the driver and Logback; must not contain `tomcat-embed`, `mariaDB4j`, Spring, servlet-api) |
-| Config | copy `config/application.properties.example` to `config/application.properties` and replace **every** `CHANGE_ME...` value (the app refuses to start otherwise); the file is git-ignored |
+| Config | copy `config/application.properties.example` to `config/application.properties` and replace **every** `CHANGE_ME...` value (the app refuses to start otherwise); the file is git-ignored. `snapshot.hmac.secret` (>= 32 characters) is required |
 | Secret scan | see `docs/IMPLEMENTATION_ROADMAP.md` G-SECRET |
 
 **Ports and files:** web server `127.0.0.1:8080` (`server.port`, `0` = random; no shutdown port); embedded database `127.0.0.1:3307` (`db.embedded.port`), grants enforced, loopback only (SDD §2.3a); runtime data in git-ignored `data/` (database `data/db`, binaries `data/runtime`, Tomcat `data/tomcat`, test scratch `data/test`).
@@ -118,8 +118,8 @@ Non-Java layout: `pom.xml`, `mvnw`, `mvnw.cmd`, `.mvn/wrapper/`, `config/applica
 | 0 | Documentation baseline | **Complete, frozen 2026-10-10**, committed `992c1fe` |
 | 1 | Skeleton + zero-install spike | **Complete** (local commit + tag `phase-1-complete`, not pushed); verified on Linux only (EV-001..EV-014), limitations in EV-013 |
 | 2 | Domain + services (no DB) | **Complete** (local commit + tag `phase-2-complete`, not pushed); 680 tests in the full build (EV-016) |
-| 3 | Persistence | **Next**, not started (needs the user's go-ahead) |
-| 4 | Concurrent pipeline | Not started |
+| 3 | Persistence | **Complete** (local commit + tag `phase-3-complete`, not pushed); 1047 tests in the full build (EV-020); MySQL 8 unverified |
+| 4 | Concurrent pipeline | **Next**, not started (needs the user's go-ahead) |
 | 5 | Resilience (simulator, recovery, shutdown, metrics) | Not started |
 | 6 | File handling + serialization | Not started |
 | 7 | Web layer | Not started |

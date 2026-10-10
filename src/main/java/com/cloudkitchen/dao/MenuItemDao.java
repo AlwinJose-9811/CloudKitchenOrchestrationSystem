@@ -17,7 +17,11 @@ public interface MenuItemDao {
 
     List<MenuItem> findAll(Connection c) throws SQLException;
 
-    long insert(Connection c, MenuItem item) throws SQLException;
+    /**
+     * Inserts a new item and returns its generated id. (A {@link MenuItem} always has an id, so a new row is described
+     * by its fields; the inventory row is created separately by {@link StockDao#create}.)
+     */
+    long insert(Connection c, long stationId, String name, BigDecimal price, boolean active) throws SQLException;
 
     /** @return {@code true} if a row was changed */
     boolean update(Connection c, long id, BigDecimal price, boolean active) throws SQLException;

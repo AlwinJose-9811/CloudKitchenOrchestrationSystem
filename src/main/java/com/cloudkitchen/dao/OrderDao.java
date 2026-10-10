@@ -24,7 +24,18 @@ import java.util.OptionalInt;
  */
 public interface OrderDao {
 
+    /** The columns a fresh read needs to decide what to do next (RR-4, RR-7): never cached by callers. */
+    record OrderState(OrderStatus status, String compensationState, String compensationReason, int compensationAttempts,
+                      boolean stockDeducted, int claimEpoch, String claimedBy) {
+    }
+
     long insert(Connection c, Order order) throws SQLException;
+
+    /** Status, compensation marker, stock flag and lease owner of one order; use on an auto-commit connection for a fresh read. */
+    Optional<OrderState> findState(Connection c, long orderId) throws SQLException;
+
+    /** The lines of one order in ascending {@code item_id} order (the order in which stock is restored). */
+    List<OrderItem> findItems(Connection c, long orderId) throws SQLException;
 
     void insertItems(Connection c, long orderId, List<OrderItem> items) throws SQLException;
 

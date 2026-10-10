@@ -25,6 +25,21 @@ public final class HttpTestClient {
         this.base = "http://127.0.0.1:" + port;
     }
 
+    public Reply post(String path, String formBody) {
+        HttpRequest request = HttpRequest.newBuilder(URI.create(base + path)).timeout(Duration.ofSeconds(20))
+                .header("Content-Type", "application/x-www-form-urlencoded")
+                .POST(HttpRequest.BodyPublishers.ofString(formBody)).build();
+        try {
+            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+            return new Reply(response.statusCode(), response.headers(), response.body());
+        } catch (IOException e) {
+            throw new IllegalStateException("POST " + path + " failed: " + e, e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("interrupted", e);
+        }
+    }
+
     public Reply get(String pathAndQuery) {
         HttpRequest request = HttpRequest.newBuilder(URI.create(base + pathAndQuery))
                 .timeout(Duration.ofSeconds(20)).GET().build();

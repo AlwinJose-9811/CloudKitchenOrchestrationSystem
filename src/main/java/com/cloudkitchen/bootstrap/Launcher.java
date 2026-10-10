@@ -1,6 +1,7 @@
 package com.cloudkitchen.bootstrap;
 
 import com.cloudkitchen.config.AppConfig;
+import com.cloudkitchen.db.DataSourceFactory;
 import com.cloudkitchen.exception.CloudKitchenException;
 import com.cloudkitchen.web.listener.AppBootstrapListener;
 import java.io.IOException;
@@ -39,8 +40,7 @@ public final class Launcher {
         AppConfig config = AppConfig.load();
         RunningApp app = start(config, true, Path.of("data", "tomcat"));
         Runtime.getRuntime().addShutdownHook(new Thread(app::close, "ck-shutdown-hook"));
-        LOG.info("Cloud Kitchen is up: http://localhost:{}/spike.jsp and http://localhost:{}/health (Ctrl+C stops it)",
-                app.port(), app.port());
+        LOG.info("Cloud Kitchen is up: http://localhost:{}/demo/orders, /spike.jsp and /health (Ctrl+C stops it)", app.port());
         app.await();
     }
 
@@ -49,10 +49,12 @@ public final class Launcher {
             throws CloudKitchenException {
         DbBootstrap database = null;
         try {
+            String jdbcUrl = null;
             if (withDatabase && "embedded".equals(config.dbMode())) {
                 database = DbBootstrap.start(DbBootstrap.settingsFrom(config));
+                jdbcUrl = DataSourceFactory.embeddedUrl(database.host(), database.port(), database.database());
             }
-            return new RunningApp(startTomcat(config, tomcatBaseDir), database);
+            return new RunningApp(startTomcat(config, tomcatBaseDir, jdbcUrl), database);
         } catch (CloudKitchenException | RuntimeException | Error e) {
             if (database != null) {
                 database.close();
@@ -61,7 +63,7 @@ public final class Launcher {
         }
     }
 
-    private static Tomcat startTomcat(AppConfig config, Path baseDir) throws CloudKitchenException {
+    private static Tomcat startTomcat(AppConfig config, Path baseDir, String jdbcUrl) throws CloudKitchenException {
         Path docBase = Path.of("src", "main", "webapp").toAbsolutePath();
         Path classes = Path.of("target", "classes").toAbsolutePath();
         if (!Files.isDirectory(docBase)) {
@@ -96,6 +98,9 @@ public final class Launcher {
             resources.addPreResources(new DirResourceSet(resources, "/WEB-INF/classes", classes.toString(), "/"));
             context.setResources(resources);
             context.getServletContext().setAttribute(AppBootstrapListener.CONFIG_ATTRIBUTE, config);
+            if (jdbcUrl != null) {
+                context.getServletContext().setAttribute(AppBootstrapListener.JDBC_URL_ATTRIBUTE, jdbcUrl);
+            }
             context.getServletContext().setAttribute(AppBootstrapListener.LAUNCHER_MARK_ATTRIBUTE,
                     "launcher-" + UUID.randomUUID());
 
@@ -132,6 +137,11 @@ public final class Launcher {
         private RunningApp(Tomcat tomcat, DbBootstrap database) {
             this.tomcat = tomcat;
             this.database = database;
+        }
+
+        /** The port of the embedded database, or -1 when no embedded database was started (useful when {@code db.embedded.port=0}). */
+        public int databasePort() {
+            return database == null ? -1 : database.port();
         }
 
         /** The port Tomcat actually listens on (useful when {@code server.port=0}). */

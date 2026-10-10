@@ -20,7 +20,8 @@ public interface StaffUserDao {
     /** Locks the row ({@code SELECT ... FOR UPDATE}) so concurrent logins cannot bypass the failure counter. */
     Optional<StaffUser> findByUsernameForUpdate(Connection c, String username) throws SQLException;
 
-    long insert(Connection c, StaffUser user) throws SQLException;
+    /** Creates an enabled account with a clean lockout state and returns its generated id; the hash is stored as given. */
+    long insert(Connection c, String username, String passwordHash, Role role) throws SQLException;
 
     void updateLoginState(Connection c, long userId, int failedAttempts, Instant lockedUntil, Instant lastLoginAt)
             throws SQLException;

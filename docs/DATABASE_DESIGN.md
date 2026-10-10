@@ -258,7 +258,15 @@ Indexes and constraints:
 | `BURGER` | Burger Barn | e.g. Classic Burger, Cheese Burger, Veg Burger, Fries, Cola | 50 / 10 |
 | `PIZZA` | Pizza Piazza | e.g. Margherita, Farmhouse, Pepperoni, Garlic Bread, Brownie | 50 / 10 |
 
-Final names and prices are decided in Phase 3 (open point O-4). Prices are fixed-scale decimals (for example `249.00`).
+Final names and prices (open point O-4 resolved in Phase 3; the user may rename them by editing `V002__seed_reference_data.sql` before the first start). Prices are fixed-scale decimals. Items are inserted in this order, so ids ascend within a brand:
+
+| Brand | Items and prices |
+|---|---|
+| `BIRYANI` | Chicken Biryani 249.00, Veg Biryani 199.00, Mutton Biryani 299.00, Raita 49.00, Gulab Jamun 79.00 |
+| `BURGER` | Classic Burger 149.00, Cheese Burger 169.00, Veg Burger 129.00, Fries 89.00, Cola 59.00 |
+| `PIZZA` | Margherita 299.00, Farmhouse 399.00, Pepperoni 449.00, Garlic Bread 149.00, Brownie 129.00 |
+
+The seed contains no users and no credentials; `UserSeeder` creates the first accounts from the git-ignored configuration.
 
 ---
 
@@ -365,7 +373,7 @@ For each snapshot order: `SELECT id FROM orders WHERE source=? AND external_ref=
 `Database.inTransaction` catches `SQLException` where `SqlErrors.isDeadlock(e)` (SQLState `40001` or vendor code `1213`), rolls back, backs off and reruns the entire work up to 3 times (also covers lock wait timeout code `1205` only if the spike shows it behaves similarly; otherwise not retried).
 
 ### TS-9 Schema initialisation
-Statements run one by one in autocommit mode (DDL implicitly commits). Each script is recorded in `schema_version` only after all its statements succeed, so a failed script is rerun from the start; therefore every DDL uses `CREATE TABLE IF NOT EXISTS` and seed inserts are guarded by `NOT EXISTS`-style selects on `code`/`(station_id,name)` (kept to the portable subset).
+Statements run one by one in autocommit mode (DDL implicitly commits). Each script is recorded in `schema_version` only after all its statements succeed, so a failed script is rerun from the start; therefore every DDL uses `CREATE TABLE IF NOT EXISTS` and seed inserts are guarded by `NOT EXISTS`-style selects on `code`/`(station_id,name)` (kept to the portable subset). MySQL has no portable `CREATE INDEX IF NOT EXISTS`, so every index is declared inside its `CREATE TABLE` (`INDEX name (cols)`); a table therefore either exists with all its indexes or not at all. `SchemaInitializer` creates `schema_version` itself before reading it; `V001` contains the same statement for completeness.
 
 ---
 

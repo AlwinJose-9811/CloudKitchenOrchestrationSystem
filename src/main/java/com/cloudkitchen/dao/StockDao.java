@@ -21,5 +21,8 @@ public interface StockDao {
 
     void set(Connection c, long itemId, int stockQty, int reorderLevel) throws SQLException;
 
+    /** Creates the inventory row of a new menu item. */
+    void create(Connection c, long itemId, int stockQty, int reorderLevel) throws SQLException;
+
     Optional<StockLevel> find(Connection c, long itemId) throws SQLException;
 }

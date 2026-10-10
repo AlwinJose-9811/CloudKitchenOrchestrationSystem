@@ -171,8 +171,16 @@ class ArchitectureRulesTest {
 
     /** {@code type} is directly in package {@code prefix} (no sub-package) when prefix ends with a dot-free package name. */
     private static boolean samePackageOrSubtype(String type, String packageName) {
-        int dot = type.lastIndexOf('.');
-        return dot > 0 && type.substring(0, dot).equals(P + packageName);
+        // nested types (Outer.Inner) belong to the package of the outer type: cut at the first upper-case segment
+        String[] segments = type.split("\\.");
+        StringBuilder pkg = new StringBuilder();
+        for (String segment : segments) {
+            if (!segment.isEmpty() && Character.isUpperCase(segment.charAt(0))) {
+                break;
+            }
+            pkg.append(pkg.length() == 0 ? "" : ".").append(segment);
+        }
+        return pkg.toString().equals(P + packageName);
     }
 
     @Test
@@ -209,8 +217,9 @@ class ArchitectureRulesTest {
 
     @Test
     void servicesDoNotDependOnWebOrOnPipelineBeyondTheThreeAllowedTypes() {
+        // pipeline is allowed here and narrowed to its three types by servicesOnlyUseTheThreeAllowedPipelineTypes
         assertImportsOnlyFrom("service", List.of("service", "dao", "db", "domain", "domain.enums", "domain.contract", "dto",
-                "exception", "util", "config", "io"),
+                "exception", "util", "config", "io", "pipeline"),
                 List.of());
     }
 
@@ -341,19 +350,25 @@ class ArchitectureRulesTest {
     // ---- call-site restrictions of SDD 7.12.5 (bite as the classes appear in later phases) ----
 
     /** method token -> the only source files (by name) that may mention it. */
-    private static final java.util.Map<String, Set<String>> CALL_SITES = java.util.Map.of(
-            "claimStockRestore", Set.of("OrderService.java", "OrderDao.java", "JdbcOrderDao.java"),
-            "markCompensationPending", Set.of("OrderService.java", "OrderDao.java", "JdbcOrderDao.java"),
-            "recordCompensationFailure", Set.of("OrderService.java", "OrderDao.java", "JdbcOrderDao.java"),
-            "expireLeasesOf", Set.of("OrderService.java", "OrderDao.java", "JdbcOrderDao.java", "OrderOrchestrator.java",
-                    "WorkerMonitor.java", "RecoveryService.java"),
-            "clearAllLeases", Set.of("OrderService.java", "OrderDao.java", "JdbcOrderDao.java", "OrderOrchestrator.java",
-                    "WorkerMonitor.java", "RecoveryService.java"),
-            "acquireLease", Set.of("OrderService.java", "OrderDao.java", "JdbcOrderDao.java", "StationWorker.java"),
-            "renewLease", Set.of("OrderService.java", "OrderDao.java", "JdbcOrderDao.java", "StationWorker.java"),
-            "releaseLease", Set.of("OrderService.java", "OrderDao.java", "JdbcOrderDao.java", "StationWorker.java"),
-            "transitionAsOwner", Set.of("OrderService.java", "StationWorker.java"),
-            "failAsOwner", Set.of("OrderService.java", "StationWorker.java"));
+    private static final java.util.Map<String, Set<String>> CALL_SITES = java.util.Map.ofEntries(
+            java.util.Map.entry("claimStockRestore", Set.of("OrderService.java", "OrderDao.java", "JdbcOrderDao.java")),
+            java.util.Map.entry("markStockDeducted", Set.of("OrderService.java", "OrderDao.java", "JdbcOrderDao.java")),
+            java.util.Map.entry("markCompensationPending", Set.of("OrderService.java", "OrderDao.java", "JdbcOrderDao.java")),
+            java.util.Map.entry("recordCompensationFailure", Set.of("OrderService.java", "OrderDao.java", "JdbcOrderDao.java")),
+            java.util.Map.entry("expireLeasesOf", Set.of("OrderService.java", "OrderDao.java", "JdbcOrderDao.java", "OrderOrchestrator.java",
+                    "WorkerMonitor.java", "RecoveryService.java")),
+            java.util.Map.entry("clearAllLeases", Set.of("OrderService.java", "OrderDao.java", "JdbcOrderDao.java", "OrderOrchestrator.java",
+                    "WorkerMonitor.java", "RecoveryService.java")),
+            java.util.Map.entry("acquireLease", Set.of("OrderService.java", "OrderDao.java", "JdbcOrderDao.java", "StationWorker.java")),
+            java.util.Map.entry("renewLease", Set.of("OrderService.java", "OrderDao.java", "JdbcOrderDao.java", "StationWorker.java")),
+            java.util.Map.entry("releaseLease", Set.of("OrderService.java", "OrderDao.java", "JdbcOrderDao.java", "StationWorker.java")),
+            java.util.Map.entry("transitionAsOwner", Set.of("OrderService.java", "StationWorker.java")),
+            java.util.Map.entry("failAsOwner", Set.of("OrderService.java", "StationWorker.java")),
+            // stock is deducted and restored only by the order workflows (TXR-2)
+            java.util.Map.entry("deduct", Set.of("OrderService.java", "StockDao.java", "JdbcStockDao.java")),
+            java.util.Map.entry("restore", Set.of("OrderService.java", "StockDao.java", "JdbcStockDao.java")),
+            // the lease stamp comes only from the DAO (S-1)
+            java.util.Map.entry("LeaseStampContext", Set.of("JdbcOrderDao.java", "Database.java", "LeaseStampContext.java", "StaleStampSqlException.java")));
 
     @Test
     void restrictedMethodsAreMentionedOnlyByTheirAllowedCallers() {
@@ -361,7 +376,8 @@ class ArchitectureRulesTest {
         for (Path file : javaFiles(MAIN)) {
             String code = stripComments(read(file));
             for (var rule : CALL_SITES.entrySet()) {
-                if (Pattern.compile("\\b" + rule.getKey() + "\\b").matcher(code).find()
+                String call = rule.getKey().equals("LeaseStampContext") ? "\\bLeaseStampContext\\b" : "\\b" + rule.getKey() + "\\s*\\(";
+                if (Pattern.compile(call).matcher(code).find()
                         && !rule.getValue().contains(file.getFileName().toString())) {
                     offenders.add(file.getFileName() + " mentions " + rule.getKey());
                 }
@@ -450,5 +466,114 @@ class ArchitectureRulesTest {
             }
         }
         assertEquals(List.of(), unexpected.stream().distinct().toList(), "packages must come from SDD section 3");
+    }
+
+    // ---- Phase 3 rules: persistence discipline ----
+
+    @Test
+    void noConnectionIsStoredInAFieldAnywhere() {
+        // FR-CON-06: a connection is borrowed for one call and never kept or shared between threads
+        Pattern field = Pattern.compile("(?m)^\\s*(?:private|protected|public)?\\s*(?:static\\s+)?(?:final\\s+)?(?:java\\.sql\\.)?Connection\\s+\\w+\\s*(?:=[^;]*)?;");
+        List<String> offenders = new ArrayList<>();
+        for (Path file : javaFiles(MAIN)) {
+            if (field.matcher(stripComments(read(file))).find()) {
+                offenders.add(file.toString());
+            }
+        }
+        assertEquals(List.of(), offenders);
+    }
+
+    @Test
+    void statementsAreCreatedOnlyByTheSchemaInitializerAndEverythingElseIsPrepared() {
+        // NFR-SEC-02: createStatement() is allowed for DDL scripts only
+        List<String> offenders = new ArrayList<>();
+        for (Path file : javaFiles(MAIN)) {
+            if (!file.getFileName().toString().equals("SchemaInitializer.java") && stripComments(read(file)).contains(".createStatement(")) {
+                offenders.add(file.toString());
+            }
+        }
+        assertEquals(List.of(), offenders);
+    }
+
+    @Test
+    void sqlTextInTheJdbcDaosIsNeverBuiltFromValues() {
+        // NFR-SEC-02: a string literal holding SQL may only be joined to constants (UPPER_SNAKE) or Sql.placeholders(n), never to a variable
+        Pattern concatenatedValue = Pattern.compile("\"[^\"\\n]*(?i:select |insert |update |delete |where |order by)[^\"\\n]*\"\\s*\\+\\s*(?!\"|[A-Z][A-Z_]+\\b|Sql\\.placeholders\\()[A-Za-z_]");
+        List<String> offenders = new ArrayList<>();
+        for (Path file : javaFiles(MAIN)) {
+            String pkg = relativePackage(MAIN, file);
+            if ((pkg.equals("dao.jdbc") || pkg.equals("db") || pkg.equals("service")) && concatenatedValue.matcher(read(file)).find()) {
+                offenders.add(file.toString());
+            }
+        }
+        assertEquals(List.of(), offenders);
+    }
+
+    @Test
+    void leaseMethodsTakeNoTimestampParameter() {
+        // S-1: no DAO or OrderService lease method accepts a time; the DAO reads the clock itself
+        Pattern declaration = Pattern.compile("(?m)^[^\\n;{}]*\\b(acquireLease|renewLease|releaseLease)\\s*\\(([^)]*)\\)");
+        List<String> offenders = new ArrayList<>();
+        for (String name : List.of("dao/OrderDao.java", "dao/jdbc/JdbcOrderDao.java", "service/OrderService.java")) {
+            java.util.regex.Matcher m = declaration.matcher(stripComments(read(MAIN.resolve("com/cloudkitchen").resolve(name))));
+            while (m.find()) {
+                if (m.group(2).contains("Instant") || m.group(2).contains("Clock") || m.group(2).contains("LocalDateTime")) {
+                    offenders.add(name + ": " + m.group(0).strip());
+                }
+            }
+        }
+        assertEquals(List.of(), offenders);
+    }
+
+    @Test
+    void theWebLayerNeverReachesThePersistenceLayerDirectly() {
+        // SDD 2.2: web -> service. The listener may use bootstrap (it builds the application context).
+        List<String> offenders = new ArrayList<>();
+        for (String pkg : List.of("web.controller", "web.filter", "web.support")) {
+            for (String imp : ownImports(pkg)) {
+                String type = imp.substring(imp.indexOf("-> ") + 3);
+                if (type.startsWith(P + "dao.") || type.startsWith(P + "dao.jdbc.") || type.startsWith(P + "db.") || type.startsWith(P + "bootstrap.")
+                        || type.startsWith(P + "pipeline.")) {
+                    offenders.add(pkg + ": " + imp);
+                }
+            }
+        }
+        assertEquals(List.of(), offenders);
+    }
+
+    @Test
+    void servicesAndTheDomainNeverNameAJdbcOrJakartaServletType() {
+        List<String> offenders = new ArrayList<>();
+        for (Path file : javaFiles(MAIN)) {
+            String pkg = relativePackage(MAIN, file);
+            if (pkg.equals("service") || pkg.startsWith("domain") || pkg.equals("pipeline") || pkg.equals("dto")) {
+                String code = stripComments(read(file));
+                if (code.contains("java.sql.") || code.contains("jakarta.servlet")) {
+                    offenders.add(file.toString());
+                }
+            }
+        }
+        assertEquals(List.of(), offenders, "not even a fully qualified name (this closes the loophole of skipping the import)");
+    }
+
+    @Test
+    void passwordsAndHashesAreNeverPartOfALogStatementInServiceOrBootstrapCode() {
+        Pattern logsSecret = Pattern.compile("LOG\\.[a-z]+\\([^;]*(?i:password|hash|secret)[^;]*,");
+        List<String> offenders = new ArrayList<>();
+        for (Path file : javaFiles(MAIN)) {
+            String pkg = relativePackage(MAIN, file);
+            if (pkg.equals("service") || pkg.equals("bootstrap") || pkg.equals("db") || pkg.equals("dao.jdbc")) {
+                java.util.regex.Matcher m = logsSecret.matcher(stripComments(read(file)));
+                while (m.find()) {
+                    String statement = m.group(0);
+                    // a message text may mention the word; an argument may not
+                    String arguments = statement.substring(statement.indexOf("\"", statement.indexOf("\"") + 1) + 1);
+                    if (Pattern.compile("(?i)\\b(password|hash|secret)\\w*\\b").matcher(arguments).find()) {
+                        offenders.add(file.getFileName() + ": " + statement);
+                    }
+                }
+            }
+        }
+        assertEquals(List.of(), offenders);
     }
 }

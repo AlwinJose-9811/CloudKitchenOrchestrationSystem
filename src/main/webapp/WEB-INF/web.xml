@@ -39,6 +39,16 @@
     <url-pattern>/health</url-pattern>
   </servlet-mapping>
 
+  <!-- Phase 3 demonstration: read-only order list from the database. Replaced by the authenticated /orders in Phase 7. -->
+  <servlet>
+    <servlet-name>OrdersDemoServlet</servlet-name>
+    <servlet-class>com.cloudkitchen.web.controller.OrdersDemoServlet</servlet-class>
+  </servlet>
+  <servlet-mapping>
+    <servlet-name>OrdersDemoServlet</servlet-name>
+    <url-pattern>/demo/orders</url-pattern>
+  </servlet-mapping>
+
   <session-config>
     <session-timeout>30</session-timeout>
     <cookie-config>

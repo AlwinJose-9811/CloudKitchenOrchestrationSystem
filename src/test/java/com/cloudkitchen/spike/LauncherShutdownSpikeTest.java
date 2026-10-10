@@ -38,6 +38,11 @@ class LauncherShutdownSpikeTest {
         Files.writeString(config, String.join("\n",
                 "db.password=" + TestDatabase.randomHex(16),
                 "snapshot.hmac.secret=" + TestDatabase.randomHex(32),
+                // Phase 3: with an empty user table the start-up creates the first accounts and refuses to start without credentials
+                "bootstrap.admin.username=boss",
+                "bootstrap.admin.password=A" + TestDatabase.randomHex(10),
+                "bootstrap.staff.username=cook",
+                "bootstrap.staff.password=S" + TestDatabase.randomHex(10),
                 "server.port=0",
                 "db.embedded.port=0",
                 "db.embedded.data.dir=" + root.resolve("db"),

@@ -42,6 +42,11 @@ public record SubmissionResult(Outcome outcome, Long orderId, boolean compensate
                 compensationPending, null, List.of());
     }
 
+    /** Another submission of the same reference is running right now in this JVM; no order id is known yet. */
+    public static SubmissionResult duplicateInFlight() {
+        return new SubmissionResult(Outcome.DUPLICATE, null, false, null, false, null, List.of());
+    }
+
     public static SubmissionResult indeterminate(long orderId) {
         return new SubmissionResult(Outcome.INDETERMINATE, orderId, false, null, false, TEMPORARY_FAILURE, List.of());
     }
