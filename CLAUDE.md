@@ -2,7 +2,7 @@
 
 Read this file at the start of **every** session. It is short on purpose; the details live in `docs/`.
 
-**Current status:** documentation baseline only. **No application code, SQL or build files exist yet.** Do not claim anything is implemented. The active phase is recorded in the table at the end of this file.
+**Current status:** Phase 0 (documentation baseline) is **complete and frozen** (2026-10-10; the commit awaits the user's approval). Phase 1 is next and has not started. **No application code, SQL or build files exist yet.** Do not claim anything is implemented. The active phase is recorded in the table at the end of this file.
 
 ## 1. What this project is
 A Java web app (Servlets + JSP + JDBC + MySQL-compatible DB, Tomcat 10.1) for an undergraduate project, built by one developer with Claude Code across several sessions. It accepts simulated orders from Swiggy, Zomato and an in-house app, validates them, routes each to its brand's kitchen station, processes them concurrently, tracks the lifecycle and persists everything.
@@ -31,6 +31,21 @@ A Java web app (Servlets + JSP + JDBC + MySQL-compatible DB, Tomcat 10.1) for an
 - **Web:** MVC; POST-redirect-GET with flash messages; CSRF token on every POST form; `AuthFilter` + `RoleFilter` on every protected route; PBKDF2WithHmacSHA256 (>= 600,000 iterations, configurable, salted, constant-time compare); session id regenerated at login; 30-minute timeout; full invalidation at logout; HttpOnly + SameSite=Lax cookies, `Secure` via config; 5 failed logins lock the account for 5 minutes; generic 400/403/404/500 pages without stack traces; dashboard auto-refresh every 5 s showing low-stock flags, queue sizes/capacity, worker states, metrics; order page shows status history. **Initial user passwords come from git-ignored config at first bootstrap; never in docs, code or commits.**
 - **Out of scope:** recipes/ingredients, real payment/delivery APIs, microservices, HTTPS, WebSockets, customer accounts, email password reset.
 - **Tiers:** MUST, SHOULD (CSV export, admin menu/stock management, worker panel), COULD (order search, public tracking page, admin password reset, charts). COULD only if everything else passes (Phase 8).
+
+### Approved additions (2026-10-10; not deviations; details in `docs/PROJECT_OVERVIEW.md` §6.5)
+- **Routing rules RR-1..RR-11** (`docs/SDD.md` §7.8): worker routes a VALIDATED order itself; never compensate after a successful `offer`; transient DB errors are retried/parked, never turned into FAILED; terminal orders are never processed; cancel re-reads and retries.
+- **`OrphanSweeper`** (`docs/SDD.md` §7.9): thread `reconcile-scheduler`, configurable schedule, re-enqueues only genuine orphans, completes pending compensations separately; changes state only through the standard conditional transitions.
+- **Account enforcement** (`docs/SDD.md` §12.10): `AuthFilter` validates `enabled`, role and `session_version` against the DB on every protected request (fail closed); disabled accounts' sessions are rejected and invalidated.
+- **Atomicity** (`docs/SDD.md` §13.1): one transaction per workflow; conditional updates and unique indexes are guards, not the atomicity mechanism; metrics, logs, flash and queue operations happen only after commit.
+- **Durable compensation** (`docs/SDD.md` §7.10): `orders.compensation_state` marker; the caller is answered only after FAILED or the PENDING marker is committed (else `INDETERMINATE`); a pending order is never leased, routed or processed, also after a restart; recovery resolves pending compensations before any enqueue.
+- **Worker health and fencing** (`docs/SDD.md` §7.11): ownership of an order is a database lease with a fencing epoch (in-memory sets are hints only); `WorkerMonitor` detects dead/stalled workers, restarts them on the same queue and reclaims leased orders; restart budget then `DEAD`.
+- **Complete fencing** (`docs/SDD.md` §7.11.12): every worker mutation is a transaction whose first statement is the fenced conditional `UPDATE` (epoch + owner + valid lease + status); later statements run only if it changed one row. `StationWorker` may call only `acquireLease/renewLease/releaseLease/transitionAsOwner/failAsOwner`; `ArchitectureRulesTest` enforces the call-site rules of §7.12.5.
+- **Lease rules** (`docs/SDD.md` §7.11.13): renewal never revives an expired, cleared or superseded lease; retired workers never acquire; expiry without supersession re-acquires, supersession stands down.
+- **Lost-id recovery** (`docs/SDD.md` §7.11.14): `WorkerMonitor` reconciles durable state with the physical queue every health interval; the sweeper runs the same repair routine as a second, independent path (plus a coarse stale-order query); hint sets are never proof.
+- **Lease stamp protocol** (`docs/SDD.md` §7.11.15): lease-validity timestamps are read only inside the DAO as the last action before the statement executes (no lease method has a timestamp parameter); renewal and owner-fenced steps require `lease_expires_at > stamp + margin` with the exact epoch and owner; a statement or commit slipping beyond `margin/2` is rolled back (`LeaseStampStaleException`) and retried with a fresh stamp; an expired lease is never revived, ownership is regained only via `acquireLease` (new epoch).
+- **Shared repair** (`docs/SDD.md` §7.13): `WorkerMonitor` and `OrphanSweeper` both run `repairStation` (on-demand health, `restartWorker(code, expectedGeneration, ...)`, lease reclaim for retired generations only, reconcile); reconcile never writes lease columns; acquire accepts a free lease or the same owner string; DAO lease methods read the `Clock` internally; after a 0-row step the worker continues, re-acquires or stands down per rule L-5.
+- **Compensation operator** (`docs/SDD.md` §7.10.11): only the ADMIN *Retry compensation* operation (TX4, audited) resolves a PENDING order; `cancelOrder` refuses it; nothing may clear the marker without the guarded stock restore.
+- Any future change that contradicts a locked decision must be recorded as a *deviation* in `docs/PROJECT_OVERVIEW.md` §6.5 and approved first.
 
 ## 4. Package structure (root `com.cloudkitchen`; full list in `docs/SDD.md` §3)
 ```
@@ -92,8 +107,8 @@ Non-Java layout: `pom.xml`, `mvnw`, `mvnw.cmd`, `.mvn/wrapper/`, `config/applica
 ## 10. Phase status
 | Phase | Name | Status |
 |---|---|---|
-| 0 | Documentation baseline | Written, awaiting user approval |
-| 1 | Skeleton + zero-install spike | Not started |
+| 0 | Documentation baseline | **Complete, frozen 2026-10-10** (commit awaiting user approval) |
+| 1 | Skeleton + zero-install spike | **Next**, not started (entry criteria in the roadmap) |
 | 2 | Domain + services (no DB) | Not started |
 | 3 | Persistence | Not started |
 | 4 | Concurrent pipeline | Not started |

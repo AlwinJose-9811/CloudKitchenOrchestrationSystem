@@ -11,7 +11,7 @@
 
 ```mermaid
 flowchart LR
-    P0["Phase 0: Documentation (this baseline)"] --> P1
+    P0["Phase 0: Documentation baseline (COMPLETE, frozen 2026-10-10)"] --> P1
     P1["1 Skeleton + zero-install spike"] --> P2["2 Domain + services (no DB)"]
     P2 --> P3["3 Persistence"]
     P3 --> P4["4 Concurrent pipeline"]
@@ -40,7 +40,7 @@ Strictly sequential: a phase starts only after the previous phase's exit gate is
 - [ ] Every gate command run; real output pasted into EVIDENCE.md (phase, command, output, date).
 - [ ] TRACEABILITY.md statuses updated (`Done (<hash>)`).
 - [ ] Viva notes filled in JAVA_CONCEPT_MAPPING.md §3 for this phase.
-- [ ] Decision log updated if anything was settled (PROJECT_OVERVIEW §6.5).
+- [ ] Decision log updated if anything was settled (PROJECT_OVERVIEW §6.7).
 - [ ] Secret scan (G-SECRET) clean.
 - [ ] Commit(s) pushed to the designated branch; local tag `phase-<n>-complete` created (tag push only with user approval, A-12).
 - [ ] Short phase report to the user; **stop and wait for approval**.
@@ -62,8 +62,16 @@ The exact test-selection commands per phase are listed in each section. Final co
 ## Phase 1: Skeleton + zero-install spike
 
 **Goal:** prove the whole zero-install stack works before any domain code exists, and settle the driver and packaging decisions.
-**Depends on:** documentation baseline approved.
+**Depends on:** Phase 0 complete (baseline frozen; the commit of the documents is approved separately by the user).
+**Status: NEXT PHASE, not started.**
 **Approvals needed first:** A-01 (internet on first build), A-02 (native DB binary, no system packages), A-03/D-018 (wrapper fetch), A-04 (append to `.gitignore`), A-14 (dependency interpretation).
+
+### Entry criteria (all must be true before task 1.1; each is checkable)
+- [ ] The user has explicitly approved committing the Phase 0 documents and the commit exists on the designated branch `claude/cloud-kitchen-orchestration-7d1aok` (`git log --oneline` shows it; `git status --short` is clean).
+- [ ] The user has answered **approved / not approved** for each of A-01, A-02, A-03 (D-018), A-04 and A-14 (record the answers in PROJECT_OVERVIEW §6.7).
+- [ ] `java -version` prints 17 or newer and `git --version` works (record both in EVIDENCE.md §2); no other tool is needed.
+- [ ] Outbound HTTPS to Maven Central works: `curl -sI https://repo.maven.apache.org/maven2/ | head -1` shows a 200 (record the output; if it fails, stop and report per A-01).
+- [ ] README.md and `.gitignore` are still untouched except for the approved `.gitignore` append in task 1.3.
 
 ### Tasks
 - [ ] 1.1 `pom.xml`: `packaging=war`, `maven.compiler.release=17`, UTF-8; pinned versions (A-10) for tomcat-embed-core, tomcat-embed-jasper (10.1.x), Jakarta Servlet/JSP/JSTL API + JSTL implementation, HikariCP, MySQL Connector/J, MariaDB4j (+ platform DB artifacts), SLF4J, Logback, JUnit 5; plugins: compiler, surefire (JUnit platform, `forkCount=1`), war, exec (mainClass `com.cloudkitchen.bootstrap.Launcher`, `classpathScope` per D-017), resources.
@@ -72,8 +80,8 @@ The exact test-selection commands per phase are listed in each section. Final co
 - [ ] 1.4 `config/application.properties.example` (placeholders only; startup rejects placeholders for secrets) and a minimal `AppConfig` sufficient for the spike.
 - [ ] 1.5 Package skeleton: directories and `package-info.java` for every package in [SDD §3](SDD.md) (one-line Javadoc each); `src/main/resources/logback.xml`.
 - [ ] 1.6 Throwaway-but-kept spike code: `Launcher` (embedded Tomcat, port from config, `addWebapp`, `/spike.jsp` using JSTL, a plain servlet), `DbBootstrap` (MariaDB4j start/stop, data dir `./data`), `web.xml` with two ordered filters and a listener.
-- [ ] 1.7 Spike tests `DbSpikeTest` and `EmbeddedTomcatSpikeTest` covering checklist S-01..S-16 (below); run `DbSpikeTest` once per candidate driver.
-- [ ] 1.8 Decide the driver (D-002), packaging approach (D-017), wrapper (D-018), config hand-off (O-3); record versions and decisions with dates in PROJECT_OVERVIEW §6.5.
+- [ ] 1.7 Spike tests `DbSpikeTest` and `EmbeddedTomcatSpikeTest` covering checklist S-01..S-19 (below); run `DbSpikeTest` once per candidate driver.
+- [ ] 1.8 Decide the driver (D-002), packaging approach (D-017), wrapper (D-018), config hand-off (O-3); record versions and decisions with dates in PROJECT_OVERVIEW §6.7.
 - [ ] 1.9 Record the actual first-run requirements (downloads, any OS libraries) in EVIDENCE.md and update assumptions A-01/A-02 to facts.
 - [ ] 1.10 Fill in CLAUDE.md "Build / run / test commands" with the commands proven in this phase.
 
@@ -96,9 +104,13 @@ The exact test-selection commands per phase are listed in each section. Final co
 | S-14 | `./mvnw exec:java` classpath works with the chosen scopes; Ctrl+C runs the shutdown hook and stops the DB |
 | S-15 | `./mvnw package` WAR contains JSTL implementation, driver, Hikari, Logback and **no** `tomcat-embed-*` / `mariaDB4j` jars |
 | S-16 | PBKDF2WithHmacSHA256 with 600,000 iterations measured (ms) on this machine |
+| S-17 | Durability: `SELECT @@innodb_flush_log_at_trx_commit` is `1` on the embedded server (otherwise override in `DbBootstrap` and record, TXR-7); also record `@@transaction_isolation` / `@@tx_isolation` |
+| S-18 | Portability of the statements added for leases and durable compensation: `UPDATE ... SET col = CASE WHEN ... END`, `claim_epoch = claim_epoch + 1` with read-back in the same transaction, `SELECT ... FOR UPDATE` filtered by `claimed_by`, `CHECK (x IS NULL OR x IN (...))`, nullable `DATETIME(3)` comparisons, affected-row counts of conditional updates (DATABASE_DESIGN §4) |
+
+| S-19 | Row-lock and current-read behaviour that the fencing invariant relies on (SDD §7.11.15 item 4): with two connections a competing conditional `UPDATE` on the same `orders` row blocks until the first transaction commits and then re-evaluates its predicate on the committed row (no lost update, no stale-predicate success) under `REPEATABLE READ`, also with an injected delay between the `UPDATE` and the commit; record `innodb_lock_wait_timeout` and the error code when it expires |
 
 ### Exit criteria
-- [ ] S-01..S-16 all pass, or any failure has a decision recorded with the user's approval via the fallback ladder (PROJECT_OVERVIEW §6.3).
+- [ ] S-01..S-19 all pass, or any failure has a decision recorded with the user's approval via the fallback ladder (PROJECT_OVERVIEW §6.3).
 - [ ] Driver chosen and recorded; DAO plan unchanged.
 - [ ] No system software was installed; first-run requirements documented.
 - [ ] `.gitignore` additions in place; secret scan clean.
@@ -135,7 +147,7 @@ Plus G-SECRET, G-TREE, G-TAG (`phase-1-complete`).
 - [ ] 2.9 `io`: `OrderEventLog` (interface), `NoOpOrderEventLog`, `EventType`.
 - [ ] 2.10 `dao`: DAO **interfaces** only (signatures per [SDD §5.2](SDD.md)).
 - [ ] 2.11 `config.AppConfig`: full typed loader, defaults, validation, secret masking.
-- [ ] 2.12 Tests: `OrderStatusTest`, `OrderPolymorphismTest`, `OrderFactoryTest`, `OrderValidatorTest`, `MoneyUtilTest`, `PasswordHasherTest`, `LockoutPolicyTest`, `RoutingServiceTest`, `InFlightRegistryTest`, `MetricsRegistryTest`, `AppConfigTest`, `ArchitectureRulesTest`.
+- [ ] 2.12 Tests: `OrderStatusTest`, `OrderPolymorphismTest`, `OrderFactoryTest`, `OrderValidatorTest`, `MoneyUtilTest`, `PasswordHasherTest`, `LockoutPolicyTest`, `RoutingServiceTest`, `InFlightRegistryTest`, `MetricsRegistryTest`, `AppConfigTest`, `ArchitectureRulesTest`. `ArchitectureRulesTest` already contains the call-site restrictions of [SDD §7.12.5](SDD.md) (they bite as the classes appear in Phases 3-5).
 
 ### Exit criteria
 - [ ] All Phase 2 tests pass; `OrderStatusTest` covers all 81 pairs.
@@ -161,31 +173,33 @@ Plus G-SECRET, G-TREE, G-TAG (`phase-2-complete`).
 **Depends on:** Phase 2 and the driver decision (D-002).
 
 ### Tasks
-- [ ] 3.1 `V001__schema.sql`, `V002__seed_reference_data.sql` per [DATABASE_DESIGN](DATABASE_DESIGN.md); `SchemaInitializer`.
-- [ ] 3.2 `db`: `DataSourceFactory`, `Database` (`inTransaction` + overload, `withConnection`, deadlock retry), `TxWork<T>`, `SqlErrors`.
+- [ ] 3.1 `V001__schema.sql`, `V002__seed_reference_data.sql` per [DATABASE_DESIGN](DATABASE_DESIGN.md) (including `uq_history_order_edge`, the lease columns `claim_epoch`/`claimed_by`/`lease_expires_at`, the durable-compensation columns `compensation_state`/`reason`/`attempts`/`next_at`, `staff_users.session_version`, and the indexes `idx_orders_status_updated`, `idx_orders_compensation`, `idx_orders_claimed_by`); `SchemaInitializer`.
+- [ ] 3.2 `db`: `DataSourceFactory`, `Database` (`inTransaction` + overload, `withConnection`, deadlock retry, `LeaseStampContext` binding and pre-commit guard), `TxWork<T>`, `SqlErrors`, `LeaseStampContext`, `LeaseStampHook`, `exception.LeaseStampStaleException` (stamp protocol S-1..S-7, [SDD §7.11.15](SDD.md); the lease DAO methods in 3.4 use it).
 - [ ] 3.3 `bootstrap.DbBootstrap` (final form), `bootstrap.UserSeeder`.
-- [ ] 3.4 `dao.jdbc`: `JdbcStationDao`, `JdbcMenuItemDao`, `JdbcStockDao`, `JdbcOrderDao`, `JdbcStatusHistoryDao`, `JdbcStaffUserDao` (prepared statements only, batch item insert, UTC timestamps).
+- [ ] 3.4 `dao.jdbc`: `JdbcStationDao`, `JdbcMenuItemDao`, `JdbcStockDao`, `JdbcOrderDao`, `JdbcStatusHistoryDao`, `JdbcStaffUserDao` (prepared statements only, batch item insert, UTC timestamps). `JdbcOrderDao` also implements the lease operations, the fenced `transition` overload, the pending-compensation statements and the `compensation_state` guards (SDD §5.2, DATABASE_DESIGN §4).
 - [ ] 3.5 `service.OrderService` (`submitOrder` with TX1, `transition` + overload, `cancelOrder`, `failOrder`, `setAccepting`) using a **fake `OrderDispatcher`** (always succeeds / always full) because the real orchestrator arrives in Phase 4; events through `NoOpOrderEventLog`.
-- [ ] 3.6 `service`: `AuthService` (+ lockout via `LockoutPolicy`), `MenuService`, `StockService`, `OrderQueryService` (read paths needed by tests).
-- [ ] 3.7 Test support: `TestDatabase`, `TestData`, `FakeClock`, `TestSupport`.
-- [ ] 3.8 Tests: `SqlPortabilityTest`, `SchemaInitializerTest`, `DatabaseTransactionTest`, `DeadlockRetryTest`, `StockDaoTest`, `OrderDaoTest`, `StatusHistoryDaoTest`, `MenuItemDaoTest`, `StaffUserDaoTest`, `OrderServiceTest`, `AuthServiceTest`, `UserSeederTest`.
+- [ ] 3.6 `service`: `AuthService` (+ lockout via `LockoutPolicy`; `validateSession`, `setEnabled` with self/last-admin guards, `session_version` handling; disabled accounts refused at login), `MenuService`, `StockService`, `OrderQueryService` (read paths needed by tests). DAO additions: `StaffUserDao.findSessionState/setEnabled/countEnabledAdmins`, `OrderDao.findStaleNonTerminal`; schema: `staff_users.session_version`, `idx_orders_status_updated`.
+- [ ] 3.7 Test support: `TestDatabase`, `TestData`, `FakeClock`, `TestSupport` (incl. `assertEachEdgeOnce`, `assertStockLedger`), `FaultInjectingOrderDao`, `FaultInjectingStockDao`, `FaultInjectingStatusHistoryDao`.
+- [ ] 3.7b Workflow atomicity per [SDD §13.1](SDD.md): one transaction per workflow (TXR-1..TXR-7); post-commit actions only after commit (`SubmissionHook` seam added with `OrderService`).
+- [ ] 3.8 Tests: `SqlPortabilityTest`, `SchemaInitializerTest`, `DatabaseTransactionTest`, `DeadlockRetryTest`, `StockDaoTest`, `OrderDaoTest`, `StatusHistoryDaoTest`, `MenuItemDaoTest`, `StaffUserDaoTest`, `OrderServiceTest`, `AuthServiceTest`, `UserSeederTest`, `TransactionAtomicityTest`, `PostCommitSideEffectsTest`, `AccountDisableServiceTest`.
 
 ### Exit criteria
 - [ ] All Phase 3 tests pass against embedded MariaDB4j.
 - [ ] TX1 rolls back completely on insufficient stock; restore matrix passes; restore exactly once.
-- [ ] Lockout works with an injected clock.
+- [ ] Lockout works with an injected clock; disabled accounts cannot log in; `validateSession` behaves per SDD §12.10.
+- [ ] `TransactionAtomicityTest` proves rollback of every workflow step pair (SDD §13.1.3); `PostCommitSideEffectsTest` passes.
 - [ ] `ArchitectureRulesTest` still green (no `Connection` fields, only prepared statements).
 - [ ] If a MySQL 8 server is available, the schema scripts were applied to it as a manual check; otherwise recorded as *unverified*.
 
 ### Gate commands
 ```
 ./mvnw -q clean verify
-./mvnw -q test -Dtest='SqlPortabilityTest,SchemaInitializerTest,DatabaseTransactionTest,DeadlockRetryTest,StockDaoTest,OrderDaoTest,StatusHistoryDaoTest,MenuItemDaoTest,StaffUserDaoTest,OrderServiceTest,AuthServiceTest,UserSeederTest'
+./mvnw -q test -Dtest='SqlPortabilityTest,SchemaInitializerTest,DatabaseTransactionTest,DeadlockRetryTest,StockDaoTest,OrderDaoTest,StatusHistoryDaoTest,MenuItemDaoTest,StaffUserDaoTest,OrderServiceTest,AuthServiceTest,UserSeederTest,TransactionAtomicityTest,PostCommitSideEffectsTest,AccountDisableServiceTest'
 ./mvnw -q test -Dtest='DeadlockRetryTest' -Duser.timezone=Asia/Kolkata
 ```
 Plus G-SECRET, G-TREE, G-TAG (`phase-3-complete`).
 
-**Requirements verified:** FR-ENV-04, FR-ENV-06, FR-ORD-01, -07, FR-LIF-03, -05, FR-INV-01..07, FR-RTE-02 (service side), FR-CON-06, FR-AUT-05, -07, NFR-SEC-02, -03.
+**Requirements verified:** NFR-REL-04, NFR-REL-05, FR-ENV-04, FR-ENV-06, FR-ORD-01, -07, FR-LIF-03, -05, FR-INV-01..07, FR-RTE-02 (service side), FR-CON-06, FR-AUT-05, -07, NFR-SEC-02, -03.
 
 ---
 
@@ -195,25 +209,35 @@ Plus G-SECRET, G-TREE, G-TAG (`phase-3-complete`).
 **Depends on:** Phase 3.
 
 ### Tasks
-- [ ] 4.1 `pipeline`: `NamedThreadFactory`, `StationRuntime`, `StationWorker` (loop, claim with retry, resumable `processOrder`, pause/resume, `WorkerState`, interrupt handling), `OrderOrchestrator` (`start`, `dispatch`, `enqueueRecovered`, `pause`, `resume`, `stationViews`, basic stop).
-- [ ] 4.2 Wire `OrderService` to the real `OrderDispatcher`; queue-full compensation (TX4); metrics and in-flight guard integrated in `submitOrder`.
-- [ ] 4.3 Test doubles: `BlockingOrderDispatcher`, `AlwaysFullOrderDispatcher`, failing-step injector for `WorkerResilienceTest`.
-- [ ] 4.4 Tests: `OrderOrchestratorTest`, `StationWorkerTest`, `QueueFullCompensationTest`, `StockDeductionConcurrencyTest`, `DuplicateSubmissionConcurrencyTest`, `ConditionalTransitionRaceTest`, `CancelVsWorkerRaceTest`, `WorkerResilienceTest`, `WorkerInterruptTest` (concurrency tests `@RepeatedTest(20)`).
+- [ ] 4.1 `pipeline`: `NamedThreadFactory`, `StationRuntime`, `StationWorker` (loop; self-routing claim RR-3; fresh reads RR-4; terminal skip RR-5; loser stands down RR-6; failure classification, in-place retry and parking RR-8; resumable `processOrder`; pause/resume; `WorkerState`; interrupt handling), `OrderOrchestrator` (`start`, `dispatch` honouring RR-11, `enqueueRecovered`, `pause`, `resume`, `stationViews`, basic stop). Add `SqlErrors.isTransient`.
+- [ ] 4.2 Wire `OrderService` to the real `OrderDispatcher`; queue-full compensation (TX4) with RR-10 retries and the **durable** fallback (TXC1 marker, `INDETERMINATE`, answer-after-durable DC-1, SDD §7.10); post-offer rule RR-1/RR-2; `cancelOrder` re-read loop RR-7; DUPLICATE with existing status; lease operations and fenced `transition` in `OrderService` (SDD §7.11.3); `SubmissionHook` test seam; metrics and in-flight guard integrated in `submitOrder`. (Indexes and columns come from the Phase 3 schema.)
+- [ ] 4.2b `pipeline.WorkerMonitor` (thread `worker-monitor`: D1 died, D2 stalled, restart/reclaim per SDD §7.11.5, restart budget, DEAD, **queue reconciliation per §7.11.14** against the physical queue), `WorkerHook` seam (stages `AFTER_POLL`, `AFTER_LEASE`, `BEFORE_RENEW`, `BEFORE_STEP`, `AFTER_STEP`, `BEFORE_PARK_OFFER`), `ThreadPoolExecutor` sizing and self-naming workers, `StationWorker` per the complete-fencing rules F-1..F-8 (§7.11.12: only `acquireLease/renewLease/releaseLease/transitionAsOwner/failAsOwner`, first-statement rule, history actor `worker:<CODE>#<generation>`), lease rules L-1..L-7 (§7.11.13: renewal never revives, re-acquire vs stand down, retired workers never acquire), `activeIds`/`queuedIds` hints, `OrderOrchestrator.restartWorker`.
+- [ ] 4.3 Test doubles: `BlockingOrderDispatcher`, `AlwaysFullOrderDispatcher`, `GatedOrderDispatcher`, `FaultInjectingOrderDao`, `CrashingSubmissionHook`, helpers `assertEachEdgeOnce`, `assertStockLedger`.
+- [ ] 4.4 Tests: `OrderOrchestratorTest`, `StationWorkerTest`, `QueueFullCompensationTest`, `StockDeductionConcurrencyTest`, `DuplicateSubmissionConcurrencyTest`, `ConditionalTransitionRaceTest`, `CancelVsWorkerRaceTest`, `WorkerResilienceTest`, `WorkerInterruptTest`, `RoutingRaceTest`, `CompensationRaceTest`, `DuplicateQueueEntryTest`, `TerminalOrderNeverResumedTest`, `TransientFailureRecoveryTest`, `DurableCompensationTest`, `PendingCompensationRaceTest`, `LeaseFencingTest`, `WorkerMonitorTest`, `WorkerHangRecoveryTest`, `DeadWorkerRaceTest`, `WorkerMutationFencingTest`, `StaleWorkerWakeTest`, `LeaseExpiryReacquireTest`, `PollToLeaseCrashWindowTest`, `QueueReconcileTest`, `ReconcileLeaseSafetyTest`, `LostReplyIdempotenceTest`, `LeaseRenewalFreshStampTest`, `LeaseStampGuardTest` (concurrency tests `@RepeatedTest(20)`; the exact race windows RW-1..RW-11 are catalogued in [TESTING_STRATEGY §6.1](TESTING_STRATEGY.md)).
 
 ### Exit criteria
 - [ ] All concurrency tests 20/20, three consecutive full builds green.
 - [ ] Thread names `station-<code>-worker` observed; no leaked threads.
 - [ ] Stock invariant checker passes after each concurrency test.
 - [ ] No `Thread.sleep` used for synchronisation in tests.
+- [ ] Routing-flow invariants I-1..I-8 ([SDD §7.8.2](SDD.md)) each demonstrated by at least one passing test; `assertStockLedger` and `assertEachEdgeOnce` used by every race test.
+- [ ] A pending-compensation order is never leased, routed or processed (DB guards, `PendingCompensationRaceTest` 20/20).
+- [ ] The lease stamp protocol of [SDD §7.11.15](SDD.md) holds: no lease DAO or `OrderService` method has a timestamp parameter; the stamp is the last action before execution; renewal after expiry fails and never revives (`LeaseRenewalFreshStampTest`); stalls beyond the guard budget roll back (`LeaseStampGuardTest`).
+- [ ] The statement sequences of [SDD §7.13.1](SDD.md) (S1..S4) are asserted by the recording DAO; reconcile and sweeper perform zero writes on lease columns (`ReconcileLeaseSafetyTest`); lost replies after commit are harmless (`LostReplyIdempotenceTest`); DAO methods read the `Clock` internally (no `now` parameter for lease operations).
+- [ ] Every worker mutation (WM-1..WM-9, SDD §7.11.12) is proven to change nothing under a stale epoch, expired/cleared lease or superseded owner (`WorkerMutationFencingTest`, `StaleWorkerWakeTest`), including zero statements after a 0-row first statement.
+- [ ] A lease never revives after expiry, monitor clear or supersession; expiry without supersession re-acquires exactly once (`LeaseFencingTest`, `LeaseExpiryReacquireTest`).
+- [ ] A worker killed right after `poll` or after the lease commit is recovered by one monitor pass without waiting for the orphan threshold (`PollToLeaseCrashWindowTest`).
+- [ ] A killed worker and a hung worker are replaced, no order is lost, none is processed twice, each edge once (`WorkerMonitorTest`, `WorkerHangRecoveryTest`, `DeadWorkerRaceTest` 20/20).
+- [ ] Scenario tables SDD §7.8.4-§7.8.9 match the observed behaviour (or the SDD is corrected with approval).
 
 ### Gate commands
 ```
 ./mvnw -q clean verify        # x3
-./mvnw -q test -Dtest='OrderOrchestratorTest,StationWorkerTest,QueueFullCompensationTest,StockDeductionConcurrencyTest,DuplicateSubmissionConcurrencyTest,ConditionalTransitionRaceTest,CancelVsWorkerRaceTest,WorkerResilienceTest,WorkerInterruptTest'
+./mvnw -q test -Dtest='OrderOrchestratorTest,StationWorkerTest,QueueFullCompensationTest,StockDeductionConcurrencyTest,DuplicateSubmissionConcurrencyTest,ConditionalTransitionRaceTest,CancelVsWorkerRaceTest,WorkerResilienceTest,WorkerInterruptTest,RoutingRaceTest,CompensationRaceTest,DuplicateQueueEntryTest,TerminalOrderNeverResumedTest,TransientFailureRecoveryTest,DurableCompensationTest,PendingCompensationRaceTest,LeaseFencingTest,WorkerMonitorTest,WorkerHangRecoveryTest,DeadWorkerRaceTest,WorkerMutationFencingTest,StaleWorkerWakeTest,LeaseExpiryReacquireTest,PollToLeaseCrashWindowTest,QueueReconcileTest,ReconcileLeaseSafetyTest,LostReplyIdempotenceTest,LeaseRenewalFreshStampTest,LeaseStampGuardTest'
 ```
 Plus G-SECRET, G-TREE, G-TAG (`phase-4-complete`).
 
-**Requirements verified:** FR-ORD-04, FR-RTE-02, FR-CON-01..08, -10, FR-LIF-03 (race), FR-INV-06 (race), NFR-REL-02.
+**Requirements verified:** FR-ORD-04, FR-ORD-11, FR-RTE-02, FR-CON-01..08, -10, -12, -14..19, FR-LIF-03 (race), FR-LIF-07, FR-INV-06 (race), NFR-REL-02.
 
 ---
 
@@ -224,14 +248,20 @@ Plus G-SECRET, G-TREE, G-TAG (`phase-4-complete`).
 
 ### Tasks
 - [ ] 5.1 `pipeline.FeedSimulator` (`start`, `stop`, `setRate`, `isRunning`, `produced`).
-- [ ] 5.2 `pipeline.RecoveryService` (DB part: reload non-terminal orders, enqueue oldest first with blocking put on `recovery-loader`; snapshot hook left as a no-op interface point for Phase 6).
+- [ ] 5.2 `pipeline.RecoveryService` with the **startup order of SDD §7.10.6**: snapshot insert of missing orders, clear all leases, resolve pending compensations, then reload non-terminal orders excluding `PENDING`, enqueue oldest first with blocking put on `recovery-loader`; snapshot writer excludes pending orders (hook for Phase 6).
 - [ ] 5.3 `pipeline.ShutdownCoordinator` (ordered idempotent steps, JVM hook, drain + `awaitTermination` + `shutdownNow`), orchestrator `shutdownGracefully`.
 - [ ] 5.4 `bootstrap.AppContext` (full manual wiring per [SDD §2.4](SDD.md), start/close, recovery latch, `accepting` handling). `Launcher` remains the Phase 1 spike launcher.
 - [ ] 5.5 `MetricsRegistry` finalised and invariant checked; `DashboardService` data side (`stationViews`, metrics view) available.
-- [ ] 5.6 Tests: `FeedSimulatorTest`, `RecoveryServiceTest`, `ResumableProcessingTest`, `ShutdownCoordinatorTest`, `GracefulShutdownTest`, `MetricsInvariantTest`.
+- [ ] 5.6 Tests: `FeedSimulatorTest`, `RecoveryServiceTest`, `ResumableProcessingTest`, `RoutingCrashWindowTest`, `ShutdownCoordinatorTest`, `GracefulShutdownTest`, `MetricsInvariantTest`.
+- [ ] 5.7 Recovery per RR-9 (missing station -> FAILED `STATION_UNAVAILABLE`), shared helper `RecoveryService.reenqueueOrFail`.
+- [ ] 5.8 `pipeline.OrphanSweeper` per [SDD §7.9](SDD.md) (approved, lease-based): DB lease proof (not `activeIds`), `queuedOnHealthyWorker`, durable pending-compensation retries with backoff and `COMPENSATION_STUCK`, configurable schedule keys and `AppConfig` cross-validation, started after recovery, stopped first at shutdown together with `WorkerMonitor`. Role: coarse backstop behind the monitor's reconcile pass (SDD §7.9 intro); decisions use the DB lease and the physical queue, never `activeIds`.
+- [ ] 5.9 Tests: `OrphanSweeperTest`, `OrphanSweeperRaceTest`, `CompensationPendingSweepTest`, `PendingCompensationRestartTest`, `CompensationBackoffTest`, `CompensationOperatorTest`, `MonitorDeathSweeperRecoveryTest`.
+- [ ] 5.10 `OrderService.retryCompensation(orderId, SessionUser admin)` per [SDD §7.10.11](SDD.md) (ADMIN-only, TX4, history actor `admin:<username>`, note `COMPENSATION_MANUAL`, idempotent, no bypass) and `cancelOrder` refusal for PENDING orders.
 
 ### Exit criteria
-- [ ] Recovery after abrupt stop proven (orders in every non-terminal status complete after restart).
+- [ ] Recovery after abrupt stop proven (orders in every non-terminal status complete after restart), including simulated crashes after TX1, after `offer`, after ROUTED and during compensation, with stock deducted/restored exactly once.
+- [ ] With the worker monitor stopped, one sweeper pass restarts a killed worker (once, compare-and-set on the generation) and recovers the lost id (`MonitorDeathSweeperRecoveryTest`).
+- [ ] Sweeper never re-enqueues queued/active/paused/parked/fresh/pending-compensation orders, never causes a duplicate edge or double restore (`OrphanSweeperRaceTest` 20/20).
 - [ ] Shutdown triggered twice runs once; bounded by configured timeouts; no leaked threads.
 - [ ] Metrics invariant holds at quiescence.
 - [ ] Three consecutive full builds green; concurrency tests 20/20.
@@ -239,11 +269,11 @@ Plus G-SECRET, G-TREE, G-TAG (`phase-4-complete`).
 ### Gate commands
 ```
 ./mvnw -q clean verify        # x3
-./mvnw -q test -Dtest='FeedSimulatorTest,RecoveryServiceTest,ResumableProcessingTest,ShutdownCoordinatorTest,GracefulShutdownTest,MetricsInvariantTest'
+./mvnw -q test -Dtest='FeedSimulatorTest,RecoveryServiceTest,ResumableProcessingTest,RoutingCrashWindowTest,OrphanSweeperTest,OrphanSweeperRaceTest,CompensationPendingSweepTest,PendingCompensationRestartTest,CompensationBackoffTest,CompensationOperatorTest,MonitorDeathSweeperRecoveryTest,ShutdownCoordinatorTest,GracefulShutdownTest,MetricsInvariantTest'
 ```
 Plus G-SECRET, G-TREE, G-TAG (`phase-5-complete`).
 
-**Requirements verified:** FR-RES-01..04, FR-CON-09 (final), NFR-REL-01 (service level), NFR-REL-03.
+**Requirements verified:** FR-RES-01..04, FR-RES-06..10, FR-CON-09 (final), NFR-REL-01 (service level), NFR-REL-03.
 
 ---
 
@@ -288,18 +318,20 @@ Plus G-SECRET, G-TREE, G-TAG (`phase-6-complete`).
 ### Tasks
 - [ ] 7.1 `web.xml` (servlets, filter order, listener, session config, error pages, `jsp-config`), `AppBootstrapListener`, final `Launcher` (replaces spike behaviour; spike JSP removed or moved under `test`).
 - [ ] 7.2 `web.support`: `BaseServlet`, `CsrfTokens`, `Flash`, `RoutePolicy`.
-- [ ] 7.3 `web.filter`: `EncodingFilter`, `SecurityHeadersFilter`, `CsrfFilter`, `AuthFilter`, `RoleFilter`.
+- [ ] 7.3 `web.filter`: `EncodingFilter`, `SecurityHeadersFilter`, `CsrfFilter`, `AuthFilter` (per-request `validateSession`, fail closed, session invalidation), `RoleFilter` (role from `ck.currentUser`).
 - [ ] 7.4 Controllers (MUST): `HomeServlet`, `ErrorServlet`, `LoginServlet`, `LogoutServlet`, `DashboardServlet`, `OrderListServlet`, `OrderDetailServlet`, `OrderCancelServlet`, `InventoryServlet`, `SimulatorServlet`.
-- [ ] 7.5 Controllers (SHOULD): `OrderCreateServlet`, `AdminMenuServlet`, `AdminStockServlet`, `WorkerPanelServlet`, `ReportServlet`, `SnapshotServlet`; `DashboardService` and `MenuService`/`StockService` admin methods.
+- [ ] 7.5 Controllers (SHOULD): `OrderCreateServlet`, `AdminMenuServlet`, `AdminStockServlet`, `WorkerPanelServlet` (pause/resume/**restart**, shows DEAD/generation), `ReportServlet`, `SnapshotServlet`, `UserAdminServlet` (enable/disable only; password reset stays COULD); `DashboardService` and `MenuService`/`StockService` admin methods. `CompensationServlet` (`/admin/compensations`, ADMIN-only retry, PRG) and the order-page banner without a Cancel button for PENDING orders.
 - [ ] 7.6 Views: JSPs, tag files, `app.css`; error pages; escaping everywhere; no scriptlets.
 - [ ] 7.7 `TestApp`, `HttpTestClient`.
-- [ ] 7.8 Tests: `LoginFlowWebTest`, `LockoutWebTest`, `SessionSecurityWebTest`, `CsrfWebTest`, `RoleAccessWebTest`, `OrderPrgWebTest`, `OrderDetailWebTest`, `DashboardWebTest`, `ErrorPagesWebTest`, `EncodingWebTest`, `SimulatorWebTest`, `AdminMenuStockWebTest`, `ReportWebTest`, `WorkerPanelWebTest`, `SecurityHeadersWebTest`, `XssEscapingWebTest`.
+- [ ] 7.8 Tests: `LoginFlowWebTest`, `LockoutWebTest`, `SessionSecurityWebTest`, `CsrfWebTest`, `RoleAccessWebTest`, `OrderPrgWebTest`, `OrderDetailWebTest`, `DashboardWebTest`, `ErrorPagesWebTest`, `EncodingWebTest`, `SimulatorWebTest`, `AdminMenuStockWebTest`, `ReportWebTest`, `WorkerPanelWebTest`, `SecurityHeadersWebTest`, `XssEscapingWebTest`, `AccountDisableWebTest`, `CompensationOperatorWebTest`.
 - [ ] 7.9 Manual usability checklist (NFR-USA-01) executed and recorded.
 
 ### Exit criteria
 - [ ] `RoleAccessWebTest` covers every route in SDD §10.2 for all three actors.
 - [ ] CSRF test covers every POST route.
 - [ ] Error pages leak nothing.
+- [ ] A disabled user's open session is rejected on the next GET and POST (`AccountDisableWebTest`).
+- [ ] Dashboard shows worker generation/restarts and the count and age of orders awaiting compensation; the order page shows the "awaiting compensation" banner (`DashboardWebTest`, `OrderDetailWebTest`, `WorkerPanelWebTest`).
 - [ ] `./mvnw exec:java` serves the full UI; manual smoke (login, simulator start, dashboard refresh, cancel, logout) recorded.
 - [ ] WAR contains no embedded-server jars (`jar tf`).
 - [ ] Three consecutive full builds green.
@@ -313,7 +345,7 @@ Plus G-SECRET, G-TREE, G-TAG (`phase-6-complete`).
 ```
 Plus G-SECRET, G-TREE, G-TAG (`phase-7-complete`).
 
-**Requirements verified:** FR-ORD-08, FR-LIF-04, FR-LIF-05 (UI), FR-INV-07 (UI), FR-INV-08, -09, FR-CON-10 (UI), FR-CON-11, FR-AUT-02, -03, -04, -06, -08, FR-WEB-01..10, -12, -13, NFR-USA-01.
+**Requirements verified:** FR-WEB-14, FR-AUT-10, FR-AUT-11, FR-ORD-08, FR-LIF-04, FR-LIF-05 (UI), FR-INV-07 (UI), FR-INV-08, -09, FR-CON-10 (UI), FR-CON-11, FR-AUT-02, -03, -04, -06, -08, FR-WEB-01..10, -12, -13, NFR-USA-01.
 
 ---
 
@@ -330,7 +362,7 @@ Plus G-SECRET, G-TREE, G-TAG (`phase-7-complete`).
 - [ ] 8.5 Security checklist walk-through (SDD §12.9) with evidence; secret scan over full history (`git log -p | grep` patterns) recorded.
 - [ ] 8.6 Portability: run on the other available OS or mark unverified; MySQL 8 manual check or mark unverified; standalone Tomcat 10.1 WAR deployment check or mark unverified (NFR-PORT-01).
 - [ ] 8.7 Concept coverage review: JAVA_CONCEPT_MAPPING checklist ticked with evidence; viva notes complete.
-- [ ] 8.8 **COULD items** (only now, only if 8.1-8.7 are green): order search (FR-ORD-09), public tracking (FR-ORD-10), admin password reset (FR-AUT-09), dashboard charts (FR-WEB-11) with their tests (`OrderSearchWebTest`, `PublicTrackingWebTest`, `AdminPasswordResetWebTest`; charts covered in `DashboardWebTest`).
+- [ ] 8.8 **COULD items** (only now, only if 8.1-8.7 are green): order search (FR-ORD-09), public tracking (FR-ORD-10), admin password reset incl. session invalidation (FR-AUT-09), dashboard charts (FR-WEB-11) with their tests (`OrderSearchWebTest`, `PublicTrackingWebTest`, `AdminPasswordResetWebTest`; charts covered in `DashboardWebTest`).
 - [ ] 8.9 Review 2 pack, created now as `docs/REVIEW2_PACK.md`: architecture one-pager, demo script (step-by-step with expected output), evidence index, requirement coverage summary, known limitations, viva Q&A pulled from the notes.
 - [ ] 8.10 `README.md` Quick start section appended (with user consent, A-08).
 - [ ] 8.11 Final tags: `phase-8-complete` and `review2-ready`.
@@ -357,7 +389,7 @@ Plus G-SECRET, G-TREE, G-TAG.
 
 ## Master checklist (tick when the phase gate is evidenced and approved)
 
-- [ ] Phase 0 documentation baseline approved
+- [x] Phase 0 documentation baseline complete and frozen (2026-10-10); commit pending the user's approval
 - [ ] Phase 1 Skeleton + zero-install spike
 - [ ] Phase 2 Domain + services (no DB)
 - [ ] Phase 3 Persistence

@@ -1,7 +1,7 @@
 # Project Overview
 
 **Project:** Cloud Kitchen Orchestration System (undergraduate project, single developer)
-**Document status:** Planning baseline created 2026-10-10. **Nothing is implemented.** Every statement describes intent, not existing behaviour.
+**Document status:** Phase 0 documentation baseline **complete and frozen on 2026-10-10** (commit awaits the user's separate approval). **Nothing is implemented or verified.** Every statement describes intent, not existing behaviour. After the freeze, a document changes only through the conflict-report procedure (CLAUDE.md §9) plus a recorded decision.
 **Related:** [SRS](SRS.md) · [SDD](SDD.md) · [DATABASE_DESIGN](DATABASE_DESIGN.md) · [JAVA_CONCEPT_MAPPING](JAVA_CONCEPT_MAPPING.md) · [IMPLEMENTATION_ROADMAP](IMPLEMENTATION_ROADMAP.md) · [TRACEABILITY](TRACEABILITY.md) · [TESTING_STRATEGY](TESTING_STRATEGY.md) · [EVIDENCE](EVIDENCE.md) · [../CLAUDE.md](../CLAUDE.md)
 
 ---
@@ -26,8 +26,8 @@ Architecture overview: [SDD §2](SDD.md).
 
 | Tier | Meaning | Items |
 |---|---|---|
-| **MUST** | Project fails without it. Built and verified in its phase. | Zero-install build/run; embedded Tomcat + embedded DB; WAR; domain model and polymorphism; lifecycle enforced in `OrderStatus`; validation; TX1 with atomic stock deduction, sorted order, deadlock retry; idempotency (unique constraint + in-flight guard); station queues, workers, orchestrator; queue-full compensation; fault isolation; interrupt handling; metrics; feed simulator with start/stop/rate; startup recovery from DB; graceful shutdown (listener + hook); orders.log (NIO); signed and filtered snapshots with recovery; login, sessions, lockout, CSRF, roles, filters; PRG + flash; generic error pages; dashboard; order page with history; simulator control page; UTF-8; security headers; docs, traceability, evidence |
-| **SHOULD** | Planned and done after the phase's MUSTs. | CSV daily report export; admin menu management; admin stock management; worker panel (pause/resume); in-house order entry form; snapshot-on-demand button; basic usability checklist; sustained-load smoke test |
+| **MUST** | Project fails without it. Built and verified in its phase. | Zero-install build/run; embedded Tomcat + embedded DB; WAR; domain model and polymorphism; lifecycle enforced in `OrderStatus`; validation; TX1 with atomic stock deduction, sorted order, deadlock retry; idempotency (unique constraint + in-flight guard); station queues, workers, orchestrator; queue-full compensation with durable pending state and ADMIN retry; DB leases with fencing and worker monitor/queue reconciliation; orphan sweeper (backstop); fault isolation; interrupt handling; metrics; feed simulator with start/stop/rate; startup recovery from DB; graceful shutdown (listener + hook); orders.log (NIO); signed and filtered snapshots with recovery; login, sessions, lockout, per-request account-status enforcement, CSRF, roles, filters; PRG + flash; generic error pages; dashboard; order page with history; simulator control page; UTF-8; security headers; docs, traceability, evidence |
+| **SHOULD** | Planned and done after the phase's MUSTs. | CSV daily report export; admin menu management; admin stock management; worker panel (pause/resume); in-house order entry form; snapshot-on-demand button; enable/disable staff accounts; basic usability checklist; sustained-load smoke test |
 | **COULD** | Only if every MUST and SHOULD passes and is evidenced. | Order search; public tracking page; admin password reset; dashboard charts |
 
 Requirement-level priorities are in [SRS §3](SRS.md).
@@ -54,6 +54,7 @@ Items marked **[APPROVAL]** need the user's explicit decision before the phase t
 | A-11 | Tests never read real credentials; they generate random secrets and users at runtime. | Phase 2+ |
 | A-12 **[APPROVAL]** | All work happens on branch `claude/cloud-kitchen-orchestration-7d1aok`. Phase tags (`phase-<n>-complete`) are created locally on that branch; **pushing tags** and opening a pull request happen only when the user asks. | each phase end |
 | A-13 | Java language level 17 (records, `switch` expressions and text blocks may be used; preview features are not). | Phase 1 |
+| A-15 | The embedded database keeps its default durability (`innodb_flush_log_at_trx_commit = 1`); verified in spike S-17. If the embedded distribution defaults differently, the setting is overridden and recorded, or the deviation is reported. | Phase 1 |
 | A-14 **[APPROVAL]** | "HikariCP as the only other dependency besides the embedded server/DB artifacts" is read as: the JDBC driver, Jakarta Servlet/JSP/JSTL APIs and implementation, MariaDB4j, Tomcat Embed and Jasper count as server/DB artifacts; SLF4J + Logback are in the locked stack; JUnit 5 is test scope; Maven plugins (compiler, surefire, war, exec, resources) are build tooling. No other library will be added without approval. | Phase 1 |
 
 ## 5. Limitations (accepted)
@@ -67,7 +68,7 @@ Items marked **[APPROVAL]** need the user's explicit decision before the phase t
 | L-05 | Orders recovered from a snapshot only (database lost) are inserted without re-deducting stock. |
 | L-06 | Single node; no clustering or leader election. |
 | L-07 | Commission rates and delivery-time formulas are constants in code. |
-| L-08 | A disabled or locked user keeps an existing session until timeout (open point O-5). |
+| L-08 | ~~A disabled user keeps an existing session until timeout~~ **Resolved 2026-10-10:** disabled accounts are rejected on the next protected request (D-033). Remaining: a request already past the filter when the account is disabled completes; failed-login lockout deliberately does not end existing sessions. |
 | L-09 | Payment and delivery are simulated; there are no external API calls. |
 | L-10 | Native serialization is used because the course requires it; it is deliberately confined, signed and allowlisted ([SDD §9](SDD.md)). |
 | L-11 | The embedded database is for development/demo, not production. |
@@ -109,7 +110,7 @@ Status values: **Locked** (given by the user, not to be changed; conflicts are r
 | D-004 | Station queues carry only the order id (`Long`) | DB is the source of truth; queue content is disposable and rebuilt at startup; small memory footprint | Decided |
 | D-005 | Submissions rejected by validation, insufficient stock or duplicate are **not persisted**; they are logged, counted and returned to the caller | Keeps the `orders` table to real orders; avoids dead rows for aggregator retries | Decided |
 | D-006 | `orders.stock_deducted` flag guards stock restore | Guarantees exactly-once restore under races (cancel vs compensation) and correctness for snapshot-recovered orders | Decided |
-| D-007 | Worker is driven by the *current DB status* and claims with bounded retry | Makes recovery resumable and resolves the race between "enqueue" and "ROUTED update" without changing the locked flow | Decided |
+| D-007 | Worker is driven by the *current DB status* (fresh auto-commit reads) and **routes a still-VALIDATED order itself** (no claim retry/sleep) | Makes recovery resumable and resolves the race between "enqueue" and "ROUTED update" without changing the locked flow (revised after the 2026-10-10 routing review, SDD §7.8) | Decided, revised, awaiting approval of the review |
 | D-008 | Statuses as `VARCHAR` + `CHECK`, not SQL `ENUM` | Portability and simple migrations | Decided |
 | D-009 | `DATETIME(3)` in UTC set by the application | Deterministic tests, no time-zone conversion, no 2038 limit | Decided |
 | D-010 | Manual wiring through `AppContext`; no DI framework | Locked stack forbids Spring; keeps lifecycle explicit | Decided |
@@ -129,6 +130,22 @@ Status values: **Locked** (given by the user, not to be changed; conflicts are r
 | D-024 | Event logging is best-effort (a failed write never fails an order) | Order integrity outranks log completeness; failures logged via SLF4J | Decided |
 | D-025 | Tests build `AppConfig` programmatically with random secrets | No credentials in the repository | Decided |
 | D-026 | `OrderService.transition` is the single place for status change + history + conditional stock restore | One audited code path | Decided |
+| D-027 | Post-offer rule: once the queue accepted the id the submitter never compensates or terminates the order; a failed `ROUTED` update is benign (RR-1, RR-2, RR-11) | Prevents a queued order from being failed by the submitter while a worker owns it | **Approved 2026-10-10 (user)** |
+| D-028 | Workers classify failures: transient DB errors are retried in place and parked, never turned into FAILED; permanent errors fail the order (RR-8) | "No silent loss" during outages without failing healthy orders | **Approved 2026-10-10 (user)** |
+| D-029 | `UNIQUE (order_id, from_status, to_status)` on `order_status_history` | Database backstop so a duplicate transition cannot commit (invariant I-4) | **Approved 2026-10-10 (user)** |
+| D-030 | `cancelOrder` re-reads and retries (max 3) instead of failing on a lost harmless race (RR-7) | Avoids false "cannot cancel" messages during routing | **Approved 2026-10-10 (user)** |
+| D-031 | Recovery fails orders whose station is missing/inactive (RR-9); compensation has bounded extra retries and a `COMPENSATION_PENDING` state (RR-10) | Nothing is left unexplained in the database | **Approved 2026-10-10 (user)** |
+| D-032 | Orphan sweeper (`OrphanSweeper`, thread `reconcile-scheduler`, configurable schedule; SDD §7.9) | Removes the "stuck until restart" residual risk U-1 while the JVM runs; identifies orphans by staleness + unknown-to-station + not-pending-compensation + fresh re-check; handles `COMPENSATION_PENDING` separately; adds no new way to change state | **Approved 2026-10-10 (user), in baseline** |
+| D-033 | Account status enforced on every protected request: `AuthFilter` re-validates `enabled`/role/`session_version` from the database, rejects and invalidates stale sessions, fails closed; `staff_users.session_version` added; admin enable/disable (SHOULD) with self/last-admin guards (SDD §12.10) | User decision 2026-10-10 (answer 4); replaces accepted limitation L-08 | **Approved 2026-10-10 (user)** |
+| D-034 | Workflow atomicity is provided only by one transaction per workflow; conditional updates and unique indexes are guards; post-commit actions (metrics, log, flash, queue) never drive correctness; durability setting verified (SDD §13.1, TXR-1..7) | User instruction 2026-10-10 | **Approved 2026-10-10 (user)** |
+| D-035 | **Durable pending compensation**: `orders.compensation_state/reason/attempts/next_at`; answer-after-durable rule with `INDETERMINATE`; database predicates (lease acquisition, `VALIDATED->ROUTED`) plus worker, recovery, sweeper and snapshot exclusions; recovery resolves pending compensations before any enqueue; retry with backoff forever; the only manual escape hatch is the ADMIN operation *Retry compensation* (TX4, audited), staff cancel is refused for pending orders (SDD §7.10, §7.10.11). Replaces the in-memory marker | User instruction 2026-10-10; closes residual risk U-2 | **Approved 2026-10-10 (user, schema change recorded in §6.5)** |
+| D-036 | **Worker health, database leases and fencing**: `orders.claim_epoch/claimed_by/lease_expires_at`, fenced worker updates, `WorkerMonitor` (died/stalled detection, restart with new generation, lease reclaim, restart budget, DEAD), sweeper decisions based on DB lease not `activeIds`, startup lease clearing, `WorkerHook` test seam (SDD §7.11) | User instruction 2026-10-10; in-memory sets must not be the only proof of active processing | **Approved 2026-10-10 (user, schema change recorded in §6.5)** |
+| D-037 | **Complete fencing**: every worker mutation catalogued (WM-1..WM-9) and executed as a transaction whose first statement is the fenced conditional update (rules F-1..F-8); `transitionAsOwner`/`failAsOwner` are the only worker entry points; history actor `worker:<CODE>#<generation>`; call-site restrictions enforced by `ArchitectureRulesTest` (SDD §7.11.12, §7.12.5) | Final adversarial audit finding F-A1 (unfenced `failOrder`) and F-A2 | **Approved 2026-10-10 (user, design only; not implemented, not verified)** |
+| D-038 | **Lease predicates**: renewal and steps require epoch, owner and a valid lease (never revive); acquire only for free leases; re-acquire after expiry without supersession, stand down otherwise; retired workers never acquire; `now` read inside the DAO; new keys `worker.reacquire.max` (SDD §7.11.13) | Audit findings F-B1, F-B2 | **Approved 2026-10-10 (user, design only; not implemented, not verified)** |
+| D-039 | **Lost-id recovery by reconcile**: `WorkerMonitor` compares durable state with the physical queue every health interval (VALIDATED after `recovery.dispatch.window.seconds`); the sweeper runs the same repair routine as a second, independent path and keeps a coarse stale-order query (see D-041); new keys `worker.reconcile.batch`, `recovery.dispatch.window.seconds` (SDD §7.11.14) | Audit findings F-C1, F-C2: recovery must not depend on in-memory sets or the 120 s orphan timeout | **Approved 2026-10-10 (user, design only; not implemented, not verified)** |
+| D-040 | **Operator compensation retry**: ADMIN-only `retryCompensation` and `/admin/compensations`; `cancelOrder` refuses PENDING orders; no operation clears the marker without the guarded restore (SDD §7.10.11) | Audit finding F-D1 | **Approved 2026-10-10 (user, design only; not implemented, not verified)** |
+| D-041 | **Shared repair routine and lost-reply idempotence**: `OrderOrchestrator.repairAll/repairStation` run by both `WorkerMonitor` and `OrphanSweeper`; worker health evaluated on demand; `restartWorker(code, expectedGeneration, reason)` compare-and-set; acquire allowed for the same owner string; rule L-5 gains a *continue* case; lease/fenced DAO methods read the `Clock` internally (SDD §7.13) | Final verification review 2026-10-10 (corrections 1-5 of §7.13.8) | **Approved 2026-10-10 (user, design only; not implemented, not verified)** |
+| D-042 | **Lease stamp protocol**: fresh in-DAO stamp as the last action before execution, usable predicate `lease_expires_at > stamp + margin` with epoch and owner, execution and pre-commit guard (`margin/2`) with rollback and retry, no timestamp parameters on lease methods; new keys `worker.lease.margin.ms`, `worker.lease.stamp.retry`; new `LeaseStampContext`, `LeaseStampHook`, `LeaseStampStaleException` (SDD §7.11.15) | User review of RI-3 (2026-10-10): renewal must never revive an expired lease | **Approved 2026-10-10 (user, design only; not implemented, not verified)** |
 
 ### 6.3 Database fallback ladder (use strictly in this order; record every step here)
 
@@ -152,12 +169,56 @@ Repository at the start of this session contained only `README.md` and `.gitigno
 | C-04 | "Zero-install" vs first-run downloads | Offline first build impossible | A-01 |
 | C-05 | MariaDB4j native binary may need system libraries on Linux | Could conflict with "no system install" | A-02, fallback ladder |
 | C-06 | "HikariCP only other dependency" vs unavoidable artifacts (driver, JSTL implementation, Jakarta APIs, Logback) | Literal reading is impossible | A-14 |
-| C-07 | Locked flow enqueues *before* the ROUTED update, so a fast worker can dequeue an order still in VALIDATED | A naive worker would drop or double-handle it | D-007 (claim retry; no change to the locked flow) |
+| C-07 | Locked flow enqueues *before* the ROUTED update, so a fast worker can dequeue an order still in VALIDATED | A naive worker would drop or double-handle it | Reviewed 2026-10-10 (SDD §7.8): **no conflict**, ROUTED is bookkeeping; D-007, D-027..D-031 close the surrounding gaps; locked flow unchanged |
 | C-08 | `PLACED -> FAILED/CANCELLED` are in the locked table but PLACED is never committed alone | Those two edges are only exercised in unit tests | Documented in [SDD §4.3](SDD.md); consistent with the lock |
 | C-09 | "Tag at phase end" vs "work only on the designated branch" | Tag push could be seen as pushing elsewhere | A-12 |
 | C-10 | Locked list of metrics has no `cancelled` | The metric invariant needs cancelled counts | Taken from the DB in tests; no extra counter (SDD §7.7) |
 
-### 6.5 Log of settled decisions (filled in during implementation)
+### 6.5 Approved additions and deviation register (2026-10-10)
+
+**Deviations from the locked decisions: none.** The locked architecture is unchanged. The user-approved changes below are additions or refinements inside it. Anything that would later contradict a locked decision must be added to this table as a *deviation* and approved before it is implemented.
+
+| ID | Addition / refinement | Locked decision it touches | Why it is not a deviation | Approved |
+|---|---|---|---|---|
+| D-007, D-027 | Worker routes a VALIDATED order itself; post-offer rule | LD-10 (order flow) | The flow validate -> TX1 -> commit -> enqueue -> conditional ROUTED is unchanged; ROUTED may be set by the worker, still conditionally | 2026-10-10 |
+| D-028 | Transient/permanent failure classification, in-place retry and parking | LD-09 (a failure in one order never kills a worker; recover cleanly) | Strengthens it | 2026-10-10 |
+| D-029 | Unique history edge index | LD-09 (conditional transitions) | Extra DB guard | 2026-10-10 |
+| D-030 | Cancel re-read loop | LD-06 | Same transition rules | 2026-10-10 |
+| D-031 | Recovery fails orders of missing stations; compensation retries and pending state | LD-10 (startup reload, compensation) | Extends recovery without changing it | 2026-10-10 |
+| D-032 | Orphan sweeper (extra scheduled thread, counters separate from the five locked metrics) | LD-09 (thread list is not exclusive), LD-10 | Runs after the locked startup recovery; changes state only through the locked conditional transitions | 2026-10-10 |
+| D-033 | `AuthFilter` does a database check per request; `staff_users.session_version`; enable/disable page | LD-13 (AuthFilter + RoleFilter, 30-minute timeout, full invalidation) | All locked properties retained; timeout and cookie rules untouched | 2026-10-10 |
+| D-034 | Documentation of transaction boundaries; durability check S-17 | LD-07, LD-10 | Documentation and verification only | 2026-10-10 |
+| D-035 | Durable compensation columns on `orders`; `INDETERMINATE` outcome | LD-10 (compensating transaction, DB is the source of truth), LD-06 (lifecycle) | The compensating transaction is unchanged and is still the primary path; the marker is an orthogonal attribute, **no status was added** and the transition table is untouched | 2026-10-10 |
+| D-037..D-040 | Complete-fencing rules, stricter lease predicates, monitor reconcile pass, operator compensation retry/page, `FaultInjecting*Dao` extensions | LD-09, LD-10, LD-13 | All refine already approved mechanisms (conditional updates, recovery, compensation, role-protected admin pages); no schema change beyond D-035/D-036 | proposed 2026-10-10 |
+| D-036 | Lease columns, fencing predicate on worker updates, `WorkerMonitor` (extra thread), `ThreadPoolExecutor` with spare capacity | LD-09 (executor owned by orchestrator, named threads, conditional updates, fault isolation) | Worker updates remain conditional (`WHERE status = ?`) with one more predicate; the executor is still owned by the orchestrator; threads stay named | 2026-10-10 |
+| - | `SubmissionHook`, `WorkerHook` test seams, `FaultInjecting*Dao` test doubles | LD-04 (no Mockito) | Hand-written fakes, no mocking framework | 2026-10-10 |
+
+### 6.6 Final adversarial design audit (2026-10-10)
+
+Documentation review only; **nothing has been implemented or run**. Details, interleavings and invariants: [SDD §7.12](SDD.md).
+
+| Issue | Finding | Fix (documented) | Planned deterministic tests |
+|---|---|---|---|
+| 1 Complete fencing | F-A1 unfenced `failOrder` let a stale worker fail an order already owned by its replacement; F-A2 no rule stopped statements after a 0-row update | WM-1..WM-9 catalogue, F-1..F-8, `transitionAsOwner`/`failAsOwner`, call-site rules, actor with generation | `WorkerMutationFencingTest`, `StaleWorkerWakeTest`, `LeaseFencingTest`, `ArchitectureRulesTest` |
+| 2 Lease correctness | F-B1 renewal could revive a cleared or expired lease; F-B2 check-then-act gap | Predicates and rules L-1..L-7, check inside the mutating statement with the row lock held | `LeaseFencingTest`, `LeaseExpiryReacquireTest`, `StaleWorkerWakeTest` |
+| 3 Lost-id recovery | F-C1 id lost after `poll` waited for the 120 s orphan rule and trusted in-memory sets; F-C2 id dropped when a lease merely expired | Death-point table P0-P9, monitor reconcile against the physical queue, L-5 re-acquire, duplicate-safety argument | `PollToLeaseCrashWindowTest`, `QueueReconcileTest`, `DeadWorkerRaceTest`, `WorkerMonitorTest` |
+| 4 Compensation recovery | F-D1 staff cancel was the escape hatch; risk of a resolve shortcut skipping the restore | ADMIN `retryCompensation` (TX4), cancel refused for PENDING, invariant I-12, call-site rules | `CompensationOperatorTest`, `CompensationOperatorWebTest`, `PendingCompensationRaceTest`, `ArchitectureRulesTest` |
+
+Counts after the audit (before the final verification review below): 112 requirements, 102 planned test classes. Verification performed: scripted cross-document consistency checks only. No test has been run; every row in TRACEABILITY.md remains `Planned`.
+
+### 6.6b Final verification review (2026-10-10, SDD §7.13)
+
+Two questions only: (1) does every worker-owned mutation follow one transaction-scoped fencing protocol; (2) does queue reconciliation recover lost ids without disturbing valid leases, also if the monitor dies. **Result: both are satisfied at design level** after five corrections (SDD §7.13.8): DAO clock rule, same-owner re-acquire after a lost reply, L-5 *continue* case, a shared repair routine so the sweeper alone can recover, and on-demand worker health. New: FR-CON-18; amended FR-CON-14, FR-CON-15, FR-RES-06. Counts at that time: 113 requirements, 105 planned test classes (superseded by §6.6c). Nothing is implemented or run; all rows remain `Planned`.
+
+### 6.6c Review of RI-3 (2026-10-10, SDD §7.11.15)
+
+The user found that RI-3 and rule L-2 allowed a renewal using a timestamp computed before expiry to succeed after expiry. Resolved by decision D-042: the old L-2 and RI-3 are withdrawn; renewal and steps use a stamp taken inside the DAO as the last action before execution, require the lease to be usable (`expiry > stamp + margin`) with the matching epoch and owner, and are rolled back if execution or the pre-commit check slips beyond `margin/2`. RI-3 is now RI-3a (pause before the DAO call), RI-3b (stall inside the DAO) and RI-3c (commit-latency boundary, residual U-12). Counts: 114 requirements (100 MUST, 10 SHOULD, 4 COULD), 107 planned test classes. Nothing is implemented or run.
+
+### 6.6d Phase 0 closeout (2026-10-10)
+
+Baseline frozen after bounded checks (consistency of the nine modified files, counts, stale-protocol sweep, recorded limitations, actionable Phase 1 entry criteria). Final wording of the lease/commit-latency limitation: SDD §7.11.15 items 1-4 (fencing guarantee, timing limitation U-12, required safety invariant, unproven assumption -> spike S-19). Decisions D-037..D-042 are approved as **design only**. Still pending, by design, until the Phase 1 spike: D-002 (driver), D-017 (packaging), D-018 (wrapper), assumptions A-01, A-02, A-03, A-04, A-14, and the unverified items S-17, S-18, S-19. Answers recorded from the user: demo brands are placeholders (A-05); missing config refuses startup with a clear error and a safe example file; extra worker controls only after core requirements; disabled accounts are enforced per request (D-033); COULD items only after all core features and tests pass, then rerun relevant tests.
+
+### 6.7 Log of settled decisions (filled in during implementation)
 
 | Date | Decision ID | Outcome | Evidence ref |
 |---|---|---|---|
@@ -176,6 +237,12 @@ Repository at the start of this session contained only `README.md` and `.gitigno
 | R-07 | Documentation and code drift between sessions | High | Medium | Docs are the source of truth; conflicts reported; traceability updated every phase |
 | R-08 | 600,000-iteration PBKDF2 slows tests | Low | Low | Few hashes per test; shared pre-hashed fixtures built once per JVM |
 | R-09 | Port conflicts (8080, 3307) | Medium | Low | Configurable ports; random ports in tests; clear startup message |
+| R-11 | An order may stay non-terminal with nobody processing it | Low | Medium | Orphan sweeper (D-032, SDD §7.9); `COMPENSATION_PENDING`/`ORDER_STALLED` logs; residual: dead worker thread (SDD §7.9.6) |
+| R-13 | Lease/epoch design adds database writes per step and relies on one JVM's clock for expiry | Low | Low | TTL/renew configurable; single instance assumed (A-09); multi-instance would need DB time (not planned) |
+| R-14 | A hung worker thread cannot be killed | Low | Low | Fencing keeps data safe; bounded executor maximum; leak detection (SDD §7.11.11) |
+| R-16 | The stamp guard can abort legitimate long multi-statement worker transactions (large restores) under slow I/O | Low | Low | Aborts are clean and retried; `worker.lease.margin.ms` configurable | 
+| R-15 | Complete fencing and reconcile add statements per step and a periodic query per station | Low | Low | Indexed queries, configurable intervals, batch limits |
+| R-12 | Per-request account validation adds one database lookup per protected request and fails closed on database errors | Low | Low | Primary-key lookup; acceptable at this scale; documented (SDD §12.10) |
 | R-10 | Windows path/line-ending issues in wrapper and scripts | Medium | Low | `.gitattributes` (Phase 1) forcing LF for `mvnw`, CRLF for `mvnw.cmd`; Windows run recorded or declared unverified |
 
 ## 8. Glossary (the same words are used in every document)
@@ -195,6 +262,8 @@ Repository at the start of this session contained only `README.md` and `.gitigno
 | **Compensation** | The compensating transaction that restores stock and marks the order FAILED when routing/enqueue fails. |
 | **In-flight order** | An order in a non-terminal status. |
 | **In-flight guard** | `InFlightRegistry`: concurrent set of `source:externalRef` keys currently being submitted. |
+| **Pending compensation** | An order in `VALIDATED` whose queue insertion failed and whose compensation could not yet commit; marked durably (`compensation_state = PENDING`) and never processed. |
+| **Lease / fencing token** | Database record that a worker generation owns an order until `lease_expires_at`; `claim_epoch` increments on each acquisition and every worker update must carry the current value. |
 | **Terminal status** | `DELIVERED`, `CANCELLED`, `FAILED`. |
 | **Conditional update** | `UPDATE ... WHERE id = ? AND status = ?` (or `AND stock_qty >= ?`); affecting 0 rows means another actor won. |
 | **Snapshot** | Signed serialized file of in-flight orders (`OrderSnapshotDTO` list) in `snapshots/`. |
@@ -203,7 +272,7 @@ Repository at the start of this session contained only `README.md` and `.gitigno
 | **Lockout** | Temporary account lock after 5 consecutive failed logins (5 minutes). |
 | **Low-stock flag** | Shown when `stock_qty <= reorder_level`. |
 | **Feed simulator** | `FeedSimulator`: scheduled producer of simulated orders from all three sources. |
-| **Worker state** | `WorkerState`: `STARTING`, `IDLE`, `PROCESSING`, `PAUSED`, `STOPPING`, `STOPPED`. |
+| **Worker state** | `WorkerState`: `STARTING`, `IDLE`, `PROCESSING`, `PAUSED`, `STOPPING`, `STOPPED`, `DEAD`. |
 | **Tracking code** | Random 12-character code per order for the (COULD) public tracking page. |
 | **Gate command** | A command whose real output must be pasted into EVIDENCE.md to close a phase. |
 
