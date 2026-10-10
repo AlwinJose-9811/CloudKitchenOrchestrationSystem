@@ -35,7 +35,7 @@ public final class Launcher {
     private Launcher() {
     }
 
-    public static void main(String[] args) {
+    public static void main(String[] args) throws CloudKitchenException {
         AppConfig config = AppConfig.load();
         RunningApp app = start(config, true, Path.of("data", "tomcat"));
         Runtime.getRuntime().addShutdownHook(new Thread(app::close, "ck-shutdown-hook"));
@@ -45,14 +45,15 @@ public final class Launcher {
     }
 
     /** Starts the optional database, then Tomcat. Everything already started is stopped if a later step fails. */
-    public static RunningApp start(AppConfig config, boolean withDatabase, Path tomcatBaseDir) {
+    public static RunningApp start(AppConfig config, boolean withDatabase, Path tomcatBaseDir)
+            throws CloudKitchenException {
         DbBootstrap database = null;
         try {
             if (withDatabase && "embedded".equals(config.dbMode())) {
                 database = DbBootstrap.start(DbBootstrap.settingsFrom(config));
             }
             return new RunningApp(startTomcat(config, tomcatBaseDir), database);
-        } catch (RuntimeException | Error e) {
+        } catch (CloudKitchenException | RuntimeException | Error e) {
             if (database != null) {
                 database.close();
             }
@@ -60,11 +61,11 @@ public final class Launcher {
         }
     }
 
-    private static Tomcat startTomcat(AppConfig config, Path baseDir) {
+    private static Tomcat startTomcat(AppConfig config, Path baseDir) throws CloudKitchenException {
         Path docBase = Path.of("src", "main", "webapp").toAbsolutePath();
         Path classes = Path.of("target", "classes").toAbsolutePath();
         if (!Files.isDirectory(docBase)) {
-            throw new CloudKitchenException("Web application directory not found: " + docBase
+            throw new CloudKitchenException("WEBAPP_NOT_FOUND", "Web application directory not found: " + docBase
                     + " (start the launcher from the project root)");
         }
         // Logback's servlet integration stops the logger context when a web application is destroyed. The embedded
@@ -100,18 +101,23 @@ public final class Launcher {
 
             tomcat.start();
             if (!context.getState().isAvailable()) { // Tomcat only logs a failed context; the launcher must not report "up"
-                throw new CloudKitchenException("The web application did not start (state " + context.getState()
-                        + "); see the Tomcat log above");
+                stopQuietly(tomcat);
+                throw new CloudKitchenException("WEBAPP_NOT_STARTED", "The web application did not start (state "
+                        + context.getState() + "); see the Tomcat log above");
             }
             return tomcat;
         } catch (LifecycleException | IOException e) {
-            try {
-                tomcat.stop();
-                tomcat.destroy();
-            } catch (LifecycleException ignored) {
-                LOG.warn("Tomcat did not stop cleanly after a failed start: {}", ignored.toString());
-            }
-            throw new CloudKitchenException("Embedded Tomcat failed to start: " + e.getMessage(), e);
+            stopQuietly(tomcat);
+            throw new CloudKitchenException("TOMCAT_START_FAILED", "Embedded Tomcat failed to start: " + e.getMessage(), e);
+        }
+    }
+
+    private static void stopQuietly(Tomcat tomcat) {
+        try {
+            tomcat.stop();
+            tomcat.destroy();
+        } catch (LifecycleException e) {
+            LOG.warn("Tomcat did not stop cleanly after a failed start: {}", e.toString());
         }
     }
 

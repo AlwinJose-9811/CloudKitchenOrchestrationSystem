@@ -1,54 +1,76 @@
-# Cloud Kitchen Orchestration System: configuration TEMPLATE.
+# Cloud Kitchen Orchestration System: configuration TEMPLATE (every key of SDD section 15).
 # Copy this file to config/application.properties (which is git-ignored) and edit it.
 # Values starting with CHANGE_ME are placeholders: the application refuses to start while a secret still has one.
 # Never put real passwords or secrets in this example file or in any committed file.
-# Phase 1 reads only the keys marked (used); the rest are listed from SDD section 15 so the file stays the full reference.
+# Every key not listed here falls back to the default in SDD section 15.
 
 # --- Web server ---
-# (used) 0 = random port (tests)
+# 0 = random port (tests)
 server.port=8080
 server.session.cookie.secure=false
 
 # --- Database ---
-# (used) embedded (MariaDB4j) or external
+# embedded (MariaDB4j) or external (then db.url is required)
 db.mode=embedded
-# (used)
+# db.url=jdbc:mysql://127.0.0.1:3306/cloudkitchen
 db.name=cloudkitchen
-# (used)
 db.user=ckapp
-# (used) secret: 12-128 chars from A-Z a-z 0-9 _ . ! @ # % ^ * + = -
+# secret: 12-128 chars from A-Z a-z 0-9 _ . ! @ # % ^ * + = -
 db.password=CHANGE_ME_db_password
-# (used)
 db.embedded.port=3307
-# (used)
 db.embedded.data.dir=./data/db
-# (used)
 db.embedded.base.dir=./data/runtime
 db.pool.max.size=10
 db.pool.connection.timeout.ms=5000
 tx.retry.max=3
 tx.retry.backoff.ms=25
 
-# --- Pipeline (later phases) ---
+# --- Pipeline ---
 station.queue.capacity=50
 queue.offer.timeout.ms=500
 worker.prep.ms=3000
 worker.pack.ms=1000
 worker.delivery.ms=4000
+worker.retry.max=8
+worker.retry.backoff.ms=200
+worker.lease.ttl.seconds=30
+worker.lease.renew.seconds=10
+worker.lease.margin.ms=200
+worker.lease.stamp.retry=3
+worker.reacquire.max=3
+worker.reconcile.batch=200
+worker.health.interval.seconds=10
+worker.stall.seconds=60
+worker.restart.max=5
+worker.restart.window.seconds=300
+compensation.backoff.seconds=30
+compensation.backoff.max.seconds=600
+compensation.alert.attempts=10
+compensation.retry.max=3
+recovery.dispatch.window.seconds=30
 recovery.sweep.enabled=true
+recovery.sweep.initial.delay.seconds=30
+recovery.sweep.interval.seconds=60
+recovery.orphan.after.seconds=120
+recovery.sweep.batch=100
 simulator.default.rate.per.minute=30
 simulator.max.rate.per.minute=600
 simulator.autostart=false
+shutdown.drain.seconds=20
+shutdown.await.seconds=10
 
-# --- Files and snapshots (later phases) ---
+# --- Files and snapshots ---
 snapshot.dir=./snapshots
 snapshot.interval.seconds=30
 snapshot.retain.count=10
+snapshot.max.bytes=5242880
+# secret: at least 32 characters
 snapshot.hmac.secret=CHANGE_ME_at_least_32_characters_long_secret
 log.orders.path=./logs/orders.log
 report.export.dir=./reports
 
-# --- Security (later phases) ---
+# --- Security ---
+# minimum 600000
 security.pbkdf2.iterations=600000
 security.lockout.max.attempts=5
 security.lockout.minutes=5
@@ -56,3 +78,5 @@ bootstrap.admin.username=admin
 bootstrap.admin.password=CHANGE_ME_admin_password
 bootstrap.staff.username=staff
 bootstrap.staff.password=CHANGE_ME_staff_password
+# locked value, only read by the JSP
+dashboard.refresh.seconds=5

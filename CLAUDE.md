@@ -2,7 +2,7 @@
 
 Read this file at the start of **every** session. It is short on purpose; the details live in `docs/`.
 
-**Current status:** Phase 0 (documentation baseline) is **complete, frozen and committed** (2026-10-10, commit `992c1fe`). Phase 1 (skeleton + zero-install spike) is **complete**: one local commit tagged `phase-1-complete` holds the code, tests and evidence (see `docs/EVIDENCE.md`); nothing has been pushed, and Windows, macOS and standalone Tomcat remain unverified. Phase 2 has not started and needs the user's explicit go-ahead. Only a skeleton, the embedded-database/Tomcat/JDBC spikes and their tests exist; **no domain code, schema SQL or business logic exists.** Do not claim anything else is implemented. The active phase is recorded in the table at the end of this file.
+**Current status:** Phase 0 (documentation baseline) is **complete, frozen and committed** (2026-10-10, commit `992c1fe`). Phase 1 (skeleton + zero-install spike) is **complete**: one local commit tagged `phase-1-complete` holds the code, tests and evidence (see `docs/EVIDENCE.md`); nothing has been pushed, and Windows, macOS and standalone Tomcat remain unverified. Phase 2 (domain and services, no database) is **complete**: one local commit tagged `phase-2-complete` holds the code, tests and evidence (`docs/EVIDENCE.md` EV-016..EV-019); nothing has been pushed. Phase 3 has not started and needs the user's explicit go-ahead. The skeleton, the spikes, the pure domain and service logic (orders, lifecycle enum, validator, routing, password hashing, lockout policy, registries, full `AppConfig`) and the DAO **interfaces** exist; **no schema SQL, JDBC implementation, `OrderService`, worker/queue code or web layer exists.** Do not claim anything else is implemented. The active phase is recorded in the table at the end of this file.
 
 ## 1. What this project is
 A Java web app (Servlets + JSP + JDBC + MySQL-compatible DB, Tomcat 10.1) for an undergraduate project, built by one developer with Claude Code across several sessions. It accepts simulated orders from Swiggy, Zomato and an in-house app, validates them, routes each to its brand's kitchen station, processes them concurrently, tracks the lifecycle and persists everything.
@@ -117,8 +117,8 @@ Non-Java layout: `pom.xml`, `mvnw`, `mvnw.cmd`, `.mvn/wrapper/`, `config/applica
 |---|---|---|
 | 0 | Documentation baseline | **Complete, frozen 2026-10-10**, committed `992c1fe` |
 | 1 | Skeleton + zero-install spike | **Complete** (local commit + tag `phase-1-complete`, not pushed); verified on Linux only (EV-001..EV-014), limitations in EV-013 |
-| 2 | Domain + services (no DB) | **Next**, not started (needs the user's go-ahead) |
-| 3 | Persistence | Not started |
+| 2 | Domain + services (no DB) | **Complete** (local commit + tag `phase-2-complete`, not pushed); 680 tests in the full build (EV-016) |
+| 3 | Persistence | **Next**, not started (needs the user's go-ahead) |
 | 4 | Concurrent pipeline | Not started |
 | 5 | Resilience (simulator, recovery, shutdown, metrics) | Not started |
 | 6 | File handling + serialization | Not started |

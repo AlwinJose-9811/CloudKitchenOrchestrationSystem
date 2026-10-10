@@ -38,9 +38,10 @@ class EmbeddedTomcatSpikeTest {
     private int port;
 
     @BeforeAll
-    void startServer() {
+    void startServer() throws Exception {
         Properties properties = new Properties();
         properties.setProperty("db.password", TestDatabase.randomHex(16));
+        properties.setProperty("snapshot.hmac.secret", TestDatabase.randomHex(32));
         properties.setProperty("server.port", "0");
         tomcatDir = Path.of("data", "test", "tomcat-" + TestDatabase.randomHex(4));
         app = Launcher.start(AppConfig.fromProperties(properties), false, tomcatDir);
@@ -146,6 +147,7 @@ class EmbeddedTomcatSpikeTest {
             thread.setContextClassLoader(isolated);
             Properties properties = new Properties();
             properties.setProperty("db.password", TestDatabase.randomHex(16));
+            properties.setProperty("snapshot.hmac.secret", TestDatabase.randomHex(32));
             properties.setProperty("server.port", "0");
             // The Tomcat started in @BeforeAll already registered the JVM-wide URL handler factory; a second copy of
             // Tomcat in this JVM must not try again (a real exec:java run has only one Tomcat).
@@ -179,6 +181,7 @@ class EmbeddedTomcatSpikeTest {
     void awaitReturnsOnlyAfterCloseHasCompletelyFinished() throws Exception {
         Properties properties = new Properties();
         properties.setProperty("db.password", TestDatabase.randomHex(16));
+        properties.setProperty("snapshot.hmac.secret", TestDatabase.randomHex(32));
         properties.setProperty("server.port", "0");
         Path dir = Path.of("data", "test", "tomcat-await-" + TestDatabase.randomHex(4));
         Launcher.RunningApp other = Launcher.start(AppConfig.fromProperties(properties), false, dir);

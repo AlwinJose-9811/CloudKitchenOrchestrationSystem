@@ -49,7 +49,7 @@ class DbSpikeTest {
     private HikariDataSource pool;
 
     @BeforeAll
-    void startDatabase() {
+    void startDatabase() throws Exception {
         settings = TestDatabase.newSettings("dbspike");
         database = DbBootstrap.start(settings);
         pool = new HikariDataSource(poolConfig(settings.appUser(), settings.appPassword()));

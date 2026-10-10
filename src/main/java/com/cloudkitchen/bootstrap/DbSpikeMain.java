@@ -1,5 +1,6 @@
 package com.cloudkitchen.bootstrap;
 
+import com.cloudkitchen.exception.CloudKitchenException;
 import java.nio.file.Path;
 import java.security.SecureRandom;
 import java.util.HexFormat;
@@ -10,7 +11,7 @@ public final class DbSpikeMain {
     private DbSpikeMain() {
     }
 
-    public static void main(String[] args) {
+    public static void main(String[] args) throws CloudKitchenException {
         Path data = Path.of("data").toAbsolutePath();
         byte[] random = new byte[16];
         new SecureRandom().nextBytes(random);

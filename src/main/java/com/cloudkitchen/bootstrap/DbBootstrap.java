@@ -69,7 +69,7 @@ public final class DbBootstrap implements AutoCloseable {
     }
 
     /** Settings derived from the configuration; the temp and socket directories sit next to the data directory. */
-    public static Settings settingsFrom(AppConfig config) {
+    public static Settings settingsFrom(AppConfig config) throws CloudKitchenException {
         Path dataDir = config.dbEmbeddedDataDir().toAbsolutePath();
         Path root = dataDir.getParent();
         int port = config.dbEmbeddedPort();
@@ -77,7 +77,7 @@ public final class DbBootstrap implements AutoCloseable {
             try (ServerSocket probe = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
                 port = probe.getLocalPort();
             } catch (IOException e) {
-                throw new CloudKitchenException("Cannot find a free port for the embedded database", e);
+                throw new CloudKitchenException("DB_BOOTSTRAP_FAILED", "Cannot find a free port for the embedded database", e);
             }
         }
         return new Settings(config.dbEmbeddedBaseDir().toAbsolutePath(), dataDir, root.resolve("tmp"),
@@ -85,7 +85,7 @@ public final class DbBootstrap implements AutoCloseable {
     }
 
     /** Prepares the data directory if needed, starts the server and returns once it accepts connections. */
-    public static DbBootstrap start(Settings settings) {
+    public static DbBootstrap start(Settings settings) throws CloudKitchenException {
         DbBootstrap bootstrap = new DbBootstrap(settings);
         try {
             bootstrap.prepareDirectories();
@@ -95,7 +95,7 @@ public final class DbBootstrap implements AutoCloseable {
             bootstrap.db = bootstrap.launch(true);
             LOG.info("Embedded database started on {}:{} (grants enforced, loopback only)", LOOPBACK, settings.port());
             return bootstrap;
-        } catch (RuntimeException | Error e) {
+        } catch (CloudKitchenException | RuntimeException | Error e) {
             bootstrap.close();
             throw e;
         }
@@ -129,7 +129,7 @@ public final class DbBootstrap implements AutoCloseable {
         }
     }
 
-    private void prepareDirectories() {
+    private void prepareDirectories() throws CloudKitchenException {
         try {
             Files.createDirectories(settings.dataDir().toAbsolutePath().getParent());
             Files.createDirectories(settings.tmpDir());
@@ -143,12 +143,12 @@ public final class DbBootstrap implements AutoCloseable {
                 }
             }
         } catch (IOException e) {
-            throw new CloudKitchenException("Cannot create database directories under " + settings.dataDir(), e);
+            throw new CloudKitchenException("DB_BOOTSTRAP_FAILED", "Cannot create database directories under " + settings.dataDir(), e);
         }
     }
 
     /** One-time phase: socket-only server without grant checks, used to remove weak defaults and add the account. */
-    private void bootstrapAccounts() {
+    private void bootstrapAccounts() throws CloudKitchenException {
         DB bootstrapDb = null;
         try {
             LOG.info("First start of this data directory: securing the installer defaults");
@@ -172,7 +172,7 @@ public final class DbBootstrap implements AutoCloseable {
         } catch (IOException e) { // includes ManagedProcessException
             // The client's console output can quote the failing statement, which contains the application password,
             // so neither the message nor the cause is passed on.
-            throw new CloudKitchenException("Securing the embedded database failed (" + e.getClass().getSimpleName()
+            throw new CloudKitchenException("DB_BOOTSTRAP_FAILED", "Securing the embedded database failed (" + e.getClass().getSimpleName()
                     + "; details withheld because the bootstrap statements contain the application password)");
         } finally {
             if (bootstrapDb != null) {
@@ -185,7 +185,7 @@ public final class DbBootstrap implements AutoCloseable {
         }
     }
 
-    private DB launch(boolean enforceGrants) {
+    private DB launch(boolean enforceGrants) throws CloudKitchenException {
         DBConfigurationBuilder cfg = DBConfigurationBuilder.newBuilder();
         cfg.setBaseDir(settings.baseDir().toFile());
         cfg.setDataDir(settings.dataDir().toFile());
@@ -203,7 +203,7 @@ public final class DbBootstrap implements AutoCloseable {
             server.start();
             return server;
         } catch (ManagedProcessException e) {
-            throw new CloudKitchenException("Embedded database failed to start on port " + settings.port()
+            throw new CloudKitchenException("DB_START_FAILED", "Embedded database failed to start on port " + settings.port()
                     + ": " + e.getMessage(), e);
         }
     }

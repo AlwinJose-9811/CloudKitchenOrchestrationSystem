@@ -573,7 +573,7 @@ Shared in `Order`: `basePreparation()` = 15 minutes + 1 minute per 2 items (inte
 | `ZomatoOrder` | `basePreparation()` + 7 min hand-off + ceil(3.5 x km) min | Status `PAID`; `platformFee` = 22% of subtotal; same arithmetic |
 | `InHouseOrder` | `basePreparation()` + ceil(3 x km) min (own riders, no hand-off) | `platformFee` = 0.00; `PENDING` for `CASH`, `PAID` for `UPI`/`CARD` |
 
-`ceil` is done with `BigDecimal.setScale(0, RoundingMode.CEILING)`. The estimate is stored as `estimated_delivery_at = created_at + estimate`; payment status/fee at creation. Rates are `private static final BigDecimal` constants; changing them is a code change (documented limitation).
+For `InHouseOrder`, `amountCharged` = subtotal and `netToKitchen` = subtotal (Phase 2 clarification; `PaymentResult` rejects any record whose net differs from charged minus fee). `ceil` is done with `BigDecimal.setScale(0, RoundingMode.CEILING)`. The estimate is stored as `estimated_delivery_at = created_at + estimate`; payment status/fee at creation. Rates are `private static final BigDecimal` constants; changing them is a code change (documented limitation).
 
 ---
 

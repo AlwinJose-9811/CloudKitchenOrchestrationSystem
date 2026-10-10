@@ -136,24 +136,24 @@ Plus G-SECRET, G-TREE, G-TAG (`phase-1-complete`).
 **Depends on:** Phase 1.
 
 ### Tasks
-- [ ] 2.1 `domain.enums`: `OrderStatus` (transition table, `canTransitionTo`, `requireTransitionTo`, `allowedTargets`, `isTerminal`, `nonTerminal`, `isStockRestorableTo`), `OrderSource`, `PaymentMode` (`allowedFor`), `PaymentStatus`, `Role`, `WorkerState`.
-- [ ] 2.2 `domain.contract`: `Trackable`, `Payable`.
-- [ ] 2.3 `domain`: `Order` (abstract), `SwiggyOrder`, `ZomatoOrder`, `InHouseOrder`, `OrderItem`, `OrderFactory`, `PaymentResult`, `StatusHistoryEntry`, `Station`, `MenuItem`, `StockLevel`, `StaffUser`.
-- [ ] 2.4 `exception`: full hierarchy ([SDD §4.2](SDD.md)).
-- [ ] 2.5 `dto`: `OrderRequest`, `OrderItemRequest`, `SubmissionResult`, `ValidationResult`, `FieldError`, `SessionUser`, `OrderFilter`, `Page<T>`, `OrderSummary`, `StockRow`, `ReportRow`, `DashboardView`, `StationView`, `WorkerView`, `MetricsView`.
-- [ ] 2.6 `util`: `MoneyUtil` (overloads), `TimeUtil` (UTC helpers).
-- [ ] 2.7 `service`: `OrderValidator` (VR-01..VR-14), `MenuCatalog`, `RoutingService`, `PasswordHasher`, `LockoutPolicy`.
-- [ ] 2.8 `pipeline`: `InFlightRegistry`, `MetricsRegistry`, `OrderDispatcher` (interface only).
-- [ ] 2.9 `io`: `OrderEventLog` (interface), `NoOpOrderEventLog`, `EventType`.
-- [ ] 2.10 `dao`: DAO **interfaces** only (signatures per [SDD §5.2](SDD.md)).
-- [ ] 2.11 `config.AppConfig`: full typed loader, defaults, validation, secret masking.
-- [ ] 2.12 Tests: `OrderStatusTest`, `OrderPolymorphismTest`, `OrderFactoryTest`, `OrderValidatorTest`, `MoneyUtilTest`, `PasswordHasherTest`, `LockoutPolicyTest`, `RoutingServiceTest`, `InFlightRegistryTest`, `MetricsRegistryTest`, `AppConfigTest`, `ArchitectureRulesTest`. `ArchitectureRulesTest` already contains the call-site restrictions of [SDD §7.12.5](SDD.md) (they bite as the classes appear in Phases 3-5).
+- [x] 2.1 `domain.enums`: `OrderStatus` (transition table, `canTransitionTo`, `requireTransitionTo`, `allowedTargets`, `isTerminal`, `nonTerminal`, `isStockRestorableTo`), `OrderSource`, `PaymentMode` (`allowedFor`), `PaymentStatus`, `Role`, `WorkerState`. **Done:** `OrderStatus` (static `EnumMap` table), `OrderSource`, `PaymentMode`, `PaymentStatus`, `Role`, `WorkerState`; `OrderStatusTest` (333 cases).
+- [x] 2.2 `domain.contract`: `Trackable`, `Payable`. **Done:** `Trackable`, `Payable`.
+- [x] 2.3 `domain`: `Order` (abstract), `SwiggyOrder`, `ZomatoOrder`, `InHouseOrder`, `OrderItem`, `OrderFactory`, `PaymentResult`, `StatusHistoryEntry`, `Station`, `MenuItem`, `StockLevel`, `StaffUser`. **Done:** all twelve types; `Order` is an immutable snapshot, status changes are database-driven in Phase 3 (EV-017).
+- [x] 2.4 `exception`: full hierarchy ([SDD §4.2](SDD.md)). **Done:** 12 exception classes (11 checked, `ConfigurationException` unchecked); `CloudKitchenException` is checked (user decision), Phase 1 callers adjusted (EV-016).
+- [x] 2.5 `dto`: `OrderRequest`, `OrderItemRequest`, `SubmissionResult`, `ValidationResult`, `FieldError`, `SessionUser`, `OrderFilter`, `Page<T>`, `OrderSummary`, `StockRow`, `ReportRow`, `DashboardView`, `StationView`, `WorkerView`, `MetricsView`. **Done:** the 15 listed DTO types plus `FencingToken`.
+- [x] 2.6 `util`: `MoneyUtil` (overloads), `TimeUtil` (UTC helpers). **Done:** `MoneyUtil` (overloaded `percentOf`), `TimeUtil`.
+- [x] 2.7 `service`: `OrderValidator` (VR-01..VR-14), `MenuCatalog`, `RoutingService`, `PasswordHasher`, `LockoutPolicy`. **Done:** VR-01..VR-14 implemented and tested.
+- [x] 2.8 `pipeline`: `InFlightRegistry`, `MetricsRegistry`, `OrderDispatcher` (interface only). **Done:** `InFlightRegistry`, `MetricsRegistry`, `OrderDispatcher`.
+- [x] 2.9 `io`: `OrderEventLog` (interface), `NoOpOrderEventLog`, `EventType`. **Done:** `OrderEventLog`, `NoOpOrderEventLog`, `EventType` (39 constants).
+- [x] 2.10 `dao`: DAO **interfaces** only (signatures per [SDD §5.2](SDD.md)). **Done:** six DAO interfaces; no implementation.
+- [x] 2.11 `config.AppConfig`: full typed loader, defaults, validation, secret masking. **Done:** every SDD section 15 key, cross-key rules; `snapshot.hmac.secret` now required (EV-018).
+- [x] 2.12 Tests: `OrderStatusTest`, `OrderPolymorphismTest`, `OrderFactoryTest`, `OrderValidatorTest`, `MoneyUtilTest`, `PasswordHasherTest`, `LockoutPolicyTest`, `RoutingServiceTest`, `InFlightRegistryTest`, `MetricsRegistryTest`, `AppConfigTest`, `ArchitectureRulesTest`. `ArchitectureRulesTest` already contains the call-site restrictions of [SDD §7.12.5](SDD.md) (they bite as the classes appear in Phases 3-5). **Done:** all twelve named classes plus seven supporting test classes; 680 tests in the full build (EV-016).
 
 ### Exit criteria
-- [ ] All Phase 2 tests pass; `OrderStatusTest` covers all 81 pairs.
-- [ ] Tests run with **no database started** (no `mysqld` process, no network).
-- [ ] `ArchitectureRulesTest` green.
-- [ ] Formulas in SDD §4.4 match the code (or the SDD is updated with approval).
+- [x] All Phase 2 tests pass; `OrderStatusTest` covers all 81 pairs. (EV-016)
+- [x] Tests run with **no database started** (no `mysqld` process, no network). (EV-016: `ps` showed no `mysqld`/`mariadbd` process after the focused gate run, and none of its 12 classes touches a database.)
+- [x] `ArchitectureRulesTest` green.
+- [x] Formulas in SDD §4.4 match the code (or the SDD is updated with approval). (EV-017: no formula changed; SDD 4.4 gained one clarifying sentence.)
 
 ### Gate commands
 ```

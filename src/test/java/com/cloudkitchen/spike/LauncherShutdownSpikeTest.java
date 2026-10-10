@@ -37,6 +37,7 @@ class LauncherShutdownSpikeTest {
         Path config = root.resolve("application.properties");
         Files.writeString(config, String.join("\n",
                 "db.password=" + TestDatabase.randomHex(16),
+                "snapshot.hmac.secret=" + TestDatabase.randomHex(32),
                 "server.port=0",
                 "db.embedded.port=0",
                 "db.embedded.data.dir=" + root.resolve("db"),
