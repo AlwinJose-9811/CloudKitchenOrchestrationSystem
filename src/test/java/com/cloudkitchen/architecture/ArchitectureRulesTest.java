@@ -576,4 +576,46 @@ class ArchitectureRulesTest {
         }
         assertEquals(List.of(), offenders);
     }
+
+    // ---- Phase 4 rules: thread discipline ----
+
+    @Test
+    void everyThreadAndExecutorOfTheApplicationIsCreatedWithAName() {
+        Pattern unnamedThread = Pattern.compile("new\\s+Thread\\(\\s*[^,()]+\\)");
+        Pattern executor = Pattern.compile("Executors\\.new\\w+\\(([^;]*)\\);");
+        Pattern pool = Pattern.compile("new\\s+(?:Scheduled)?ThreadPoolExecutor\\(([^;]*)\\);");
+        List<String> offenders = new ArrayList<>();
+        for (Path file : javaFiles(MAIN)) {
+            String code = stripComments(read(file));
+            if (unnamedThread.matcher(code).find()) {
+                offenders.add(file.getFileName() + ": new Thread without a name");
+            }
+            for (Pattern creator : List.of(executor, pool)) {
+                java.util.regex.Matcher m = creator.matcher(code);
+                while (m.find()) {
+                    if (!m.group(1).contains("ThreadFactory")) {
+                        offenders.add(file.getFileName() + ": " + m.group(0).replaceAll("\\s+", " "));
+                    }
+                }
+            }
+        }
+        assertEquals(List.of(), offenders, "SDD 7.1: every thread is named (use NamedThreadFactory)");
+    }
+
+    @Test
+    void pipelineTestsAndTheirSupportSynchroniseWithoutSleeping() {
+        // roadmap Phase 4 exit criterion: no Thread.sleep used for synchronisation in the concurrency tests
+        List<Path> files = new ArrayList<>(javaFiles(TEST.resolve("com").resolve("cloudkitchen").resolve("pipeline")));
+        for (String support : List.of("PipelineHarness", "RecordingOrderEventLog", "FakeDispatchers", "SimulatedWorkerDeath", "SimulatedCrash")) {
+            files.add(TEST.resolve("com").resolve("cloudkitchen").resolve("testsupport").resolve(support + ".java"));
+        }
+        List<String> offenders = new ArrayList<>();
+        for (Path file : files) {
+            String code = stripComments(read(file));
+            if (code.contains("Thread.sleep") || Pattern.compile("TimeUnit\\.\\w+\\.sleep").matcher(code).find()) {
+                offenders.add(file.getFileName().toString());
+            }
+        }
+        assertEquals(List.of(), offenders);
+    }
 }

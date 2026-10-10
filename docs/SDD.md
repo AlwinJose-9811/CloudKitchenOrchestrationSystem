@@ -1665,6 +1665,51 @@ Sweeper-only latency is at most one `recovery.sweep.interval.seconds` (default 6
 * **Not yet verified:** nothing is implemented or executed. The proof obligations are carried by the planned tests named above; they must pass 20 of 20 where repeated, and be recorded in EVIDENCE.md, before any of this is called verified. Remaining design-level risks are listed in §7.11.11 and §7.12.7 (both schedulers dead; hung threads; clock jumps; single JVM).
 
 
+### 7.14 Phase 4 implementation record: ownership of threads, state, connections and transactions (2026-10-10)
+
+This section records what the Phase 4 code does; it adds no requirement. Everything in it is implemented in package `pipeline` (plus the read API added to `OrderService`) and proven by the tests named in `docs/EVIDENCE.md` EV-026..EV-032. Items that remain future work are marked.
+
+#### 7.14.1 Classes
+
+| Class | Role |
+|---|---|
+| `OrderOrchestrator implements OrderDispatcher` | Creates one `StationRuntime` and one `StationWorker` per active station, owns the worker executor and the `WorkerMonitor`; `dispatch` (RR-11), `enqueueRecovered`, `pause`/`resume`, `stationViews`, `repairAll`/`repairStation`, `restartWorker(code, expectedGeneration, reason)`, `shutdownGracefully` |
+| `StationRuntime` | The station, its bounded `ArrayBlockingQueue<Long>`, the current worker generation and future, the hint sets `queuedIds`/`activeIds`, the paused/dead/closed flags and the restart history (changed only under its lock) |
+| `StationWorker implements Runnable` | The loop of 7.3 with the lease and fencing rules of 7.11; calls only `acquireLease`, `renewLease`, `releaseLease`, `transitionAsOwner`, `failAsOwner` and the read methods of `OrderService` (F-6, enforced by `ArchitectureRulesTest`) |
+| `WorkerMonitor` | Thread `worker-monitor`; every `worker.health.interval.seconds` it calls `OrderOrchestrator.repairAll()`; `runOnce()` is public so that tests drive passes without sleeping |
+| `NamedThreadFactory`, `PipelineSettings`, `WorkerHook` | Named non-daemon threads with an uncaught-exception log (class name only); one immutable record of every pipeline tunable; the test seam of 7.11.10 |
+| `OrderService` additions | `readProgress(orderId)` (fresh auto-commit read, RR-4), `findReconcilableIds(stationId, window, limit)` (pure read), `isTransientFailure(Throwable)` (RR-8 classification), so that `pipeline` never imports `dao` or `db` |
+
+#### 7.14.2 Ownership table
+
+| Component | Created and owned by | Threads that touch it | Mutable state and its guard | Database connection | Transaction scope |
+|---|---|---|---|---|---|
+| `OrderOrchestrator` | `AppContext` (Phase 5), tests today | request/simulator threads call `dispatch`; `worker-monitor` calls `repairAll`; admin calls `pause`/`resume`/`restartWorker`; the shutdown path calls `shutdownGracefully` | `runtimes` (`ConcurrentSkipListMap`, filled once in `start`), `started`/`stopping` (`volatile`), `hook` (`AtomicReference`) | none of its own | none, except `restartWorker`: one short transaction (`reclaimLeasesOf`) executed while holding that station's runtime lock; no other lock is taken inside it |
+| Worker executor `station-pool` | `OrderOrchestrator.start`; `ThreadPoolExecutor`, core = stations, maximum = stations + `worker.restart.max`, `SynchronousQueue`, `NamedThreadFactory` | pool threads; each renames itself to `station-<CODE>-worker` (`-g<n>` from generation 2) while it runs a worker and restores the pool name afterwards | pool state | none | none; shut down by `shutdownGracefully` (drain, stop, interrupt) |
+| `StationWorker` (one generation) | `OrderOrchestrator.launch`, published through `StationRuntime.install` **before** it is submitted | exactly one pool thread runs it; the monitor, the dashboard and tests read its `volatile` fields | `state`, `heartbeat`, `stopRequested`, `draining`, `retired`, `exited`, `currentOrderId` are `volatile`; the per-order `Session` is confined to the worker thread | none held: every `OrderService` call borrows one pooled connection and returns it before it returns | reads are auto-commit (`withConnection`); every lease operation and every status step is one `Database.inTransaction` whose first statement is the fenced conditional update (F-1, F-2); history and stock restore follow in the same transaction |
+| Station queue `ArrayBlockingQueue<Long>` (bounded, `station.queue.capacity`) | `StationRuntime` | producers: request threads (`offer` with `queue.offer.timeout.ms`), repair/reconcile (`offer`), worker parking (`offer`), recovery (`put`); consumer: the current generation only (`poll`) | the queue's own lock; `physicalSnapshot` copies it with `toArray` under that lock | none | none: memory only; losing or duplicating an entry never changes an outcome (I-1) |
+| `InFlightRegistry` | `AppContext`, tests | request threads inside `OrderService.submitOrder` | `ConcurrentHashMap.newKeySet`; `tryAcquire` and `release` bracket the whole submission in a `try/finally` | none | none: a fast duplicate filter in front of `UNIQUE (source, external_ref)` |
+| `WorkerMonitor` | `OrderOrchestrator.start` | its own single-thread scheduler `worker-monitor` (and tests via `runOnce`) | `lastPass` (`volatile`) | none of its own | each pass: reads, optional restart transaction, reads (reconcile) |
+| `MetricsRegistry` | `AppContext`, tests | all threads | `AtomicLong` counters | none | updated only after the transaction that justifies the count committed (I-5) |
+| Pooled connections (HikariCP) | `Database` (Phase 3) | any thread, for the duration of one `inTransaction`/`withConnection` call | never stored in a field (`ArchitectureRulesTest`), never passed between threads | borrowed, used by the borrowing thread only, returned in `try-with-resources`; `DbFixture`/`PipelineHarness.stop` assert zero active connections after shutdown | `Database.inTransaction`: auto-commit off, rollback on any failure, deadlock retry up to `tx.retry.max`, lease-stamp context bound to the calling thread |
+
+#### 7.14.3 Queue protocol and failure windows as implemented
+
+1. `OrderService.submitOrder` validates, runs TX1 (order, lines, history, ascending stock deduction, `VALIDATED`) and commits; only then does it call `OrderDispatcher.dispatch`.
+2. `OrderOrchestrator.dispatch` returns normally **iff** the id is in the station queue (`BlockingQueue.offer(e, timeout)` either inserts or does not; an interrupt before insertion throws with the flag restored). Otherwise it throws `QueueFullException` with reason `QUEUE_FULL`, `STATION_UNAVAILABLE`, `QUEUE_CLOSED` or `INTERRUPTED`, and `OrderService` runs the compensating transaction TX4 (restore stock once, `FAILED`, history, event) or, if that keeps failing, the durable `PENDING` marker (7.10).
+3. After a successful `dispatch` the submitter only attempts the conditional `VALIDATED -> ROUTED`; its failure or loss is benign (RR-1, RR-2) because the worker routes the order itself with a fenced update (RR-3). Nothing after a successful enqueue can fail the order from the submitter's side (I-7).
+4. A crash or failure around the enqueue therefore leaves one of: no order (W0); `VALIDATED` and not queued (W1), repaired by reconcile once the order is older than `recovery.dispatch.window.seconds`; `VALIDATED` and queued (W2) or `ROUTED` and queued (W3), processed normally; a queue that lost its entries, repaired by reconcile from the database. `QueueReconcileTest` exercises W1, W2 and a lost queue.
+
+#### 7.14.4 Clarifications made while implementing (decisions D-048..D-052 in `PROJECT_OVERVIEW.md` 6.5)
+
+* The brief's `OrderOrchestrator.submit(order)` is the frozen pair `OrderService.submitOrder` (validate, TX1, route, compensation) plus `OrderOrchestrator.dispatch` (queue); no second entry point exists.
+* The worker remembers when it last extended its lease (acquire, successful step or renewal, on the worker's `Clock`) and renews between sleep slices once `worker.lease.renew.seconds` have passed since then; a failed renewal is not acted on there, the next fenced step returns zero rows and rule L-5 decides.
+* When `acquireLease` returns empty the worker re-reads the order to log the true reason: `ORDER_SKIPPED_TERMINAL`, `ORDER_SKIPPED_PENDING_COMPENSATION` or `ORDER_SKIPPED_LEASED`.
+* A worker thread dies only from a `VirtualMachineError`; every other `Throwable` inside one order is classified by RR-8 and never ends the loop.
+* `OrderOrchestrator.shutdownGracefully` implements steps 4-6 of 7.6 (drain, stop, interrupt); the coordinator, the JVM hook, the snapshot and the file log arrive in Phase 5/6.
+* A pending lease reclaim that fails during `restartWorker` is logged and the restart goes ahead; the old owner's leases then expire by time and the next reconcile pass recovers the orders (`WorkerMonitorTest`).
+* A status step whose reply is lost after the commit is recognised on the retry (zero rows, status already advanced, same epoch) and the worker continues; the only visible effect is that the event and metric of that one step are not emitted (`LostReplyIdempotenceTest`).
+
 ---
 
 ## 8. File handling design

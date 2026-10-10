@@ -66,7 +66,7 @@ public final class FaultInjector<T> {
         return this;
     }
 
-    public void clearFaults() {
+    public synchronized void clearFaults() {
         faults.clear();
         always.clear();
         before.clear();

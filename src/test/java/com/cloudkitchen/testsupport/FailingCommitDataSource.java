@@ -18,6 +18,7 @@ public final class FailingCommitDataSource implements DataSource {
 
     private final DataSource delegate;
     private final AtomicInteger failures = new AtomicInteger();
+    private final AtomicInteger lostReplies = new AtomicInteger();
 
     public FailingCommitDataSource(DataSource delegate) {
         this.delegate = delegate;
@@ -27,12 +28,24 @@ public final class FailingCommitDataSource implements DataSource {
         failures.set(count);
     }
 
+    /**
+     * The next {@code count} commits really happen and then report a connection failure: the transaction is durable
+     * but the caller never learns it (a lost reply, SDD 7.13.4 FI-3, FI-6).
+     */
+    public void loseNextReplies(int count) {
+        lostReplies.set(count);
+    }
+
     @Override
     public Connection getConnection() throws SQLException {
         Connection real = delegate.getConnection();
         return (Connection) Proxy.newProxyInstance(Connection.class.getClassLoader(), new Class<?>[] {Connection.class}, (proxy, method, args) -> {
             if (method.getName().equals("commit") && failures.getAndUpdate(n -> Math.max(0, n - 1)) > 0) {
                 throw new SQLException("injected commit failure", "08S01");
+            }
+            if (method.getName().equals("commit") && lostReplies.getAndUpdate(n -> Math.max(0, n - 1)) > 0) {
+                real.commit();
+                throw new SQLException("injected lost reply after commit", "08S01");
             }
             try {
                 return method.invoke(real, args);

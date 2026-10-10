@@ -19,6 +19,7 @@ import com.cloudkitchen.domain.enums.OrderStatus;
 import com.cloudkitchen.domain.enums.Role;
 import com.cloudkitchen.dto.FencingToken;
 import com.cloudkitchen.dto.OrderItemRequest;
+import com.cloudkitchen.dto.OrderProgress;
 import com.cloudkitchen.dto.OrderRequest;
 import com.cloudkitchen.dto.SessionUser;
 import com.cloudkitchen.dto.SubmissionResult;
@@ -594,6 +595,34 @@ public final class OrderService {
                 LOG.debug("Stale lease stamp, retrying with a fresh one ({} of {})", attempt + 1, settings.leaseStampRetry());
             }
         }
+    }
+
+    // ------------------------------------------------------------------------------------------------------
+    // Fresh reads for the pipeline (RR-4): auto-commit connection, never inside an open transaction
+    // ------------------------------------------------------------------------------------------------------
+
+    /**
+     * RR-8 classification for callers that must not name database types: {@code true} if retrying the same step later
+     * may succeed (a transient database error, or a lease stamp that went stale, S-6); anything else is permanent.
+     */
+    public static boolean isTransientFailure(Throwable error) {
+        return error instanceof LeaseStampStaleException || SqlErrors.isTransient(error);
+    }
+
+    /** The current status, compensation marker and lease epoch/owner of an order, read on a fresh connection. */
+    public Optional<OrderProgress> readProgress(long orderId) throws CloudKitchenException {
+        return database.withConnection(c -> orders.findState(c, orderId))
+                .map(s -> new OrderProgress(s.status(), "PENDING".equals(s.compensationState()), s.claimEpoch(), s.claimedBy()));
+    }
+
+    /**
+     * Ids of the orders of one station that a lost-id repair may re-offer (SDD 7.11.14): ordinary (not pending
+     * compensation), lease free at the stamp, and either past {@code VALIDATED} or older than the dispatch window.
+     * A pure read; it never touches the lease columns.
+     */
+    public List<Long> findReconcilableIds(long stationId, Duration dispatchWindow, int limit) throws CloudKitchenException {
+        return database.withConnection(c -> orders.findReconcilable(c, stationId, dispatchWindow, limit)).stream()
+                .map(Order::getId).toList();
     }
 
     // ------------------------------------------------------------------------------------------------------
