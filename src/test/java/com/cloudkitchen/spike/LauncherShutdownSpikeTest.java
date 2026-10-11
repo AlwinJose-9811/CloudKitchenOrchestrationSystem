@@ -47,13 +47,17 @@ class LauncherShutdownSpikeTest {
                 "db.embedded.port=0",
                 "db.embedded.data.dir=" + root.resolve("db"),
                 "db.embedded.base.dir=" + Path.of("data", "runtime").toAbsolutePath(),
+                // Phase 6: the order log, the snapshots and the reports of this child belong to this test, not to ./logs and ./snapshots
+                "log.orders.path=" + root.resolve("logs").resolve("orders.log"),
+                "snapshot.dir=" + root.resolve("snapshots"),
+                "report.export.dir=" + root.resolve("reports"),
                 ""), StandardCharsets.UTF_8);
 
         // The output goes to a file, not a pipe: Java closes a child's pipe when it exits, and a reader blocked at that
         // moment loses the last lines, which are exactly the shutdown lines this test must see.
         Path logFile = root.resolve("launcher.log");
         Process child = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
-                "-Dck.config=" + config, "-cp", System.getProperty("java.class.path"),
+                "-Dck.config=" + config, "-DCK_APP_LOG_DIR=" + root.resolve("applog"), "-cp", System.getProperty("java.class.path"),
                 "com.cloudkitchen.bootstrap.Launcher").redirectErrorStream(true)
                 .redirectOutput(logFile.toFile()).start();
         try {

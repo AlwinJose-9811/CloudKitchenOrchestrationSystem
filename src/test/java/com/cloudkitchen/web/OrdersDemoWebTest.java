@@ -59,6 +59,10 @@ class OrdersDemoWebTest {
         p.setProperty("db.embedded.data.dir", root.resolve("db").toString());
         p.setProperty("db.embedded.base.dir", Path.of("data").toAbsolutePath().resolve("runtime").toString());
         p.setProperty("snapshot.hmac.secret", hmac);
+        // Phase 6: this stack writes its order log, snapshots and reports into the test's own directory, never into ./logs or ./snapshots
+        p.setProperty("log.orders.path", root.resolve("files").resolve("orders.log").toString());
+        p.setProperty("snapshot.dir", root.resolve("files").resolve("snapshots").toString());
+        p.setProperty("report.export.dir", root.resolve("files").resolve("reports").toString());
         p.setProperty("bootstrap.admin.username", "boss");
         p.setProperty("bootstrap.admin.password", "A" + TestDatabase.randomHex(10));
         p.setProperty("bootstrap.staff.username", "cook");

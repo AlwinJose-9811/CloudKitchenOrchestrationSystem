@@ -86,8 +86,8 @@ class GracefulShutdownTest {
         ShutdownCoordinator.Outcome outcome = app.shutdownCoordinator().outcome();
         assertNotNull(outcome);
         assertTrue(outcome.complete() && !outcome.anyFailed(), outcome.toString());
-        assertEquals(List.of("stop recovery", "stop accepting orders", "stop the feed simulator", "stop the sweeper and the worker monitor",
-                "drain and stop the workers", "close the connection pool", "close the event log"),
+        assertEquals(List.of("stop recovery", "stop accepting orders", "stop the feed simulator", "stop the sweeper, the worker monitor and the snapshot task",
+                "drain and stop the workers", "write the final snapshot", "close the connection pool", "close the event log"),
                 outcome.steps().stream().map(ShutdownCoordinator.StepResult::name).toList(), "the documented order (SDD 7.6)");
         assertTrue(millis < (5 + 5 + 5) * 1000L, "bounded by drain + await + 5 s, took " + millis + " ms");
         assertFalse(app.orders().isAccepting());
@@ -252,8 +252,8 @@ class GracefulShutdownTest {
         assertTrue(drain.note().contains("caller was interrupted"), "the outcome says what happened: " + drain.note());
         assertFalse(drain.note().contains("did not end even after"), "and does not claim a hung worker: " + drain.note());
         assertTrue(flagAfterClose.get(), "the closer's interrupt flag was restored when the shutdown returned");
-        assertEquals(List.of("stop recovery", "stop accepting orders", "stop the feed simulator", "stop the sweeper and the worker monitor",
-                "drain and stop the workers", "close the connection pool", "close the event log"),
+        assertEquals(List.of("stop recovery", "stop accepting orders", "stop the feed simulator", "stop the sweeper, the worker monitor and the snapshot task",
+                "drain and stop the workers", "write the final snapshot", "close the connection pool", "close the event log"),
                 outcome.steps().stream().map(ShutdownCoordinator.StepResult::name).toList());
         assertThrows(PersistenceException.class, () -> app.database().withConnection(c -> 1), "the pool was closed after the workers");
         assertEquals("OUT_FOR_DELIVERY", h.t.text("SELECT status FROM orders WHERE id = ?", id), "unfinished and recoverable");

@@ -294,20 +294,20 @@ Plus G-SECRET, G-TREE, G-TAG (`phase-5-complete`).
 **Depends on:** Phase 5.
 
 ### Tasks
-- [ ] 6.1 `io.NioOrderEventLog` (NIO append-only, lock, sanitising); wire `OrderEventLog` calls at every event point in services/pipeline; production wiring in `AppContext`.
-- [ ] 6.2 `io.CsvReportExporter`, `service.ReportService`.
-- [ ] 6.3 `snapshot.OrderSnapshotDTO`, `HmacSigner`, `SnapshotFilterFactory`, `SnapshotService` (`writeSnapshot`, `readLatestValid`, `recoverMissingOrders`, `pruneOld`), `SnapshotTask`.
-- [ ] 6.4 Integrate: `RecoveryService` calls `recoverMissingOrders()`; `ShutdownCoordinator` final snapshot step; periodic task started after recovery.
-- [ ] 6.5 `logback.xml` finalised (thread name in pattern; no PII).
-- [ ] 6.6 Documentation check: SDD §9 contains rationale, risks and versioning; confirm the allowlist pattern in the code and update SDD §9.4 if it differs.
-- [ ] 6.7 Tests: `NioOrderEventLogTest`, `OrderEventLogConcurrencyTest`, `NoPiiInLogsTest`, `CsvReportExporterTest`, `HmacSignerTest`, `SnapshotRoundTripTest`, `SnapshotTamperTest`, `SnapshotFilterTest`, `SnapshotRecoveryTest`, `SnapshotTaskTest`.
+- [x] 6.1 `io.NioOrderEventLog` (NIO append-only, lock, sanitising); wire `OrderEventLog` calls at every event point in services/pipeline; production wiring in `AppContext`.
+- [x] 6.2 `io.CsvReportExporter`, `service.ReportService`. **Done (EV-048).**
+- [x] 6.3 `snapshot.OrderSnapshotDTO`, `HmacSigner`, `SnapshotFilterFactory`, `SnapshotService` (`writeSnapshot`, `readLatestValid`, `recoverMissingOrders`, `pruneOld`), `SnapshotTask`.
+- [x] 6.4 Integrate: `RecoveryService` calls `recoverMissingOrders()`; `ShutdownCoordinator` final snapshot step; periodic task started after recovery.
+- [x] 6.5 `logback.xml` finalised (thread name in pattern; no PII).
+- [x] 6.6 Documentation check: SDD §9 contains rationale, risks and versioning; confirm the allowlist pattern in the code and update SDD §9.4 if it differs.
+- [x] 6.7 Tests: `NioOrderEventLogTest`, `OrderEventLogConcurrencyTest`, `NoPiiInLogsTest`, `CsvReportExporterTest`, `HmacSignerTest`, `SnapshotRoundTripTest`, `SnapshotTamperTest`, `SnapshotFilterTest`, `SnapshotRecoveryTest`, `SnapshotTaskTest`.
 
 ### Exit criteria
-- [ ] Tamper and filter tests prove rejection **before** deserialization.
-- [ ] No PII/secret in any log output of a full run.
-- [ ] `ObjectInputStream` appears only in package `snapshot` (`ArchitectureRulesTest`).
-- [ ] Three consecutive full builds green; concurrency tests 20/20.
-- [ ] FR-SER-07 documentation review ticked.
+- [x] Tamper and filter tests prove rejection **before** deserialization. **Met (EV-049).**
+- [x] No PII/secret in any log output of a full run. **Met (EV-047).**
+- [x] `ObjectInputStream` appears only in package `snapshot` (`ArchitectureRulesTest`).
+- [x] Three consecutive full builds green; concurrency tests 20/20. **See EV-052.**
+- [x] FR-SER-07 documentation review ticked. **Met:** SDD 9.1-9.3 hold the rationale, the risks and the versioning policy; 9.4 and 7.16 were updated to the code as built (EV-051).
 
 ### Gate commands
 ```

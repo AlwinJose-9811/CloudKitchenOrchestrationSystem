@@ -10,7 +10,10 @@ import com.cloudkitchen.dao.jdbc.JdbcStockDao;
 import com.cloudkitchen.db.DataSourceFactory;
 import com.cloudkitchen.db.Database;
 import com.cloudkitchen.exception.CloudKitchenException;
-import com.cloudkitchen.io.NoOpOrderEventLog;
+import com.cloudkitchen.exception.SnapshotWriteException;
+import com.cloudkitchen.io.CsvReportExporter;
+import com.cloudkitchen.io.EventType;
+import com.cloudkitchen.io.NioOrderEventLog;
 import com.cloudkitchen.io.OrderEventLog;
 import com.cloudkitchen.pipeline.FeedSimulator;
 import com.cloudkitchen.pipeline.InFlightRegistry;
@@ -25,10 +28,14 @@ import com.cloudkitchen.service.MenuService;
 import com.cloudkitchen.service.OrderQueryService;
 import com.cloudkitchen.service.OrderService;
 import com.cloudkitchen.service.OrderValidator;
+import com.cloudkitchen.service.ReportService;
 import com.cloudkitchen.service.PasswordHasher;
 import com.cloudkitchen.service.RoutingService;
 import com.cloudkitchen.service.StockService;
 import com.cloudkitchen.service.SubmissionHook;
+import com.cloudkitchen.snapshot.HmacSigner;
+import com.cloudkitchen.snapshot.SnapshotService;
+import com.cloudkitchen.snapshot.SnapshotTask;
 import com.zaxxer.hikari.HikariDataSource;
 import java.time.Clock;
 import java.time.Duration;
@@ -67,12 +74,17 @@ public final class AppContext implements AutoCloseable {
     private final MenuService menu;
     private final StockService stock;
     private final ShutdownCoordinator shutdown;
+    private final NioOrderEventLog eventLog;
+    private final SnapshotService snapshots;
+    private final SnapshotTask snapshotTask;
+    private final ReportService reports;
     private final CountDownLatch ready;
 
     private AppContext(HikariDataSource pool, Database database, OrderQueryService orderQueries, MetricsRegistry metrics,
                        OrderService orderService, OrderOrchestrator orchestrator, FeedSimulator simulator,
                        RecoveryService recovery, OrphanSweeper sweeper, DashboardService dashboard, MenuService menu,
-                       StockService stock, ShutdownCoordinator shutdown, CountDownLatch ready) {
+                       StockService stock, ShutdownCoordinator shutdown, NioOrderEventLog eventLog, SnapshotService snapshots,
+                       SnapshotTask snapshotTask, ReportService reports, CountDownLatch ready) {
         this.pool = pool;
         this.database = database;
         this.orderQueries = orderQueries;
@@ -86,6 +98,10 @@ public final class AppContext implements AutoCloseable {
         this.menu = menu;
         this.stock = stock;
         this.shutdown = shutdown;
+        this.eventLog = eventLog;
+        this.snapshots = snapshots;
+        this.snapshotTask = snapshotTask;
+        this.reports = reports;
         this.ready = ready;
     }
 
@@ -109,6 +125,7 @@ public final class AppContext implements AutoCloseable {
         ShutdownCoordinator coordinator = new ShutdownCoordinator(
                 Duration.ofSeconds(config.shutdownDrainSeconds() + config.shutdownAwaitSeconds() + 10L));
         OrderOrchestrator[] started = new OrderOrchestrator[1];
+        NioOrderEventLog[] openedLog = new NioOrderEventLog[1];
         try {
             Database database = new Database(pool, clock, config.txRetryMax(), config.txRetryBackoffMs());
             var applied = new SchemaInitializer(database, clock).apply();
@@ -118,9 +135,11 @@ public final class AppContext implements AutoCloseable {
 
             MetricsRegistry metrics = new MetricsRegistry();
             InFlightRegistry inFlight = new InFlightRegistry();
-            OrderEventLog events = new NoOpOrderEventLog(); // the file log arrives in Phase 6
+            NioOrderEventLog events = new NioOrderEventLog(config.logOrdersPath(), clock);
+            openedLog[0] = events;
             JdbcOrderDao orderDao = new JdbcOrderDao(clock, Duration.ofMillis(config.workerLeaseMarginMs()));
             JdbcStockDao stockDao = new JdbcStockDao(clock);
+            JdbcStatusHistoryDao historyDao = new JdbcStatusHistoryDao();
             JdbcMenuItemDao menuDao = new JdbcMenuItemDao(clock);
             JdbcStationDao stationDao = new JdbcStationDao();
             RoutingService routing = new RoutingService();
@@ -128,7 +147,7 @@ public final class AppContext implements AutoCloseable {
 
             OrderOrchestrator orchestrator = OrderOrchestrator.from(config, routing, clock, events, metrics);
             started[0] = orchestrator;
-            OrderService orderService = new OrderService(database, orderDao, stockDao, new JdbcStatusHistoryDao(), menuDao,
+            OrderService orderService = new OrderService(database, orderDao, stockDao, historyDao, menuDao,
                     new OrderValidator(), routing, orchestrator, inFlight, metrics, events, clock, SubmissionHook.NO_OP,
                     OrderService.Settings.from(config));
             orchestrator.start(orderService);
@@ -138,23 +157,28 @@ public final class AppContext implements AutoCloseable {
             StockService stock = new StockService(database, stockDao);
             FeedSimulator simulator = new FeedSimulator(orderService, FeedSimulator.randomGenerator(routing, menu, new Random()),
                     config.simulatorDefaultRatePerMinute(), config.simulatorMaxRatePerMinute(), clock, events);
-            RecoveryService recovery = new RecoveryService(orderService, orchestrator, events, RecoveryService.SnapshotStep.NONE);
+            SnapshotService snapshots = new SnapshotService(database, orderDao, historyDao, config.snapshotDir(),
+                    new HmacSigner(config.snapshotHmacSecret()), config.snapshotMaxBytes(), config.snapshotRetainCount(), clock, events);
+            SnapshotTask snapshotTask = new SnapshotTask(snapshots::writeAndPrune, config.snapshotIntervalSeconds(), clock);
+            ReportService reports = new ReportService(database, orderDao, new CsvReportExporter(config.reportExportDir()));
+            RecoveryService recovery = new RecoveryService(orderService, orchestrator, events, snapshots::recoverMissingOrders);
             OrphanSweeper sweeper = new OrphanSweeper(orderService, orchestrator, recovery, OrphanSweeper.Settings.from(config), clock, events);
             DashboardService dashboard = new DashboardService(queries, stock, orderService, orchestrator::stationViews, metrics::view,
                     simulator::isRunning, simulator::getRate, recovery::isRecovering);
 
-            registerShutdownSteps(coordinator, config, orderService, recovery, simulator, sweeper, orchestrator, events, pool, ownedResource);
+            registerShutdownSteps(coordinator, config, orderService, recovery, simulator, sweeper, snapshotTask, snapshots, orchestrator, events, pool, ownedResource);
             if (installJvmHook) {
                 coordinator.installJvmHook();
             }
             CountDownLatch ready = new CountDownLatch(1);
             AppContext app = new AppContext(pool, database, queries, metrics, orderService, orchestrator, simulator, recovery,
-                    sweeper, dashboard, menu, stock, coordinator, ready);
+                    sweeper, dashboard, menu, stock, coordinator, events, snapshots, snapshotTask, reports, ready);
             recovery.start(() -> {
                 if (coordinator.isStarted()) {
                     return; // the application is already shutting down: start nothing
                 }
                 sweeper.start();
+                snapshotTask.start();
                 orderService.setAccepting(true);
                 if (config.simulatorAutostart()) {
                     simulator.start(config.simulatorDefaultRatePerMinute());
@@ -170,6 +194,12 @@ public final class AppContext implements AutoCloseable {
                 }
                 return null;
             });
+            coordinator.register("close the order log after a failed start", () -> {
+                if (openedLog[0] != null) {
+                    openedLog[0].close();
+                }
+                return null;
+            });
             coordinator.register("close the pool after a failed start", () -> {
                 pool.close();
                 return null;
@@ -181,9 +211,11 @@ public final class AppContext implements AutoCloseable {
 
     /** The ordered steps of SDD 7.6; each is bounded by its own timeout. */
     private static void registerShutdownSteps(ShutdownCoordinator coordinator, AppConfig config, OrderService orderService,
-                                              RecoveryService recovery, FeedSimulator simulator, OrphanSweeper sweeper, OrderOrchestrator orchestrator,
-                                              OrderEventLog events, HikariDataSource pool, AutoCloseable ownedResource) {
+                                              RecoveryService recovery, FeedSimulator simulator, OrphanSweeper sweeper, SnapshotTask snapshotTask,
+                                              SnapshotService snapshots, OrderOrchestrator orchestrator, OrderEventLog events,
+                                              HikariDataSource pool, AutoCloseable ownedResource) {
         coordinator.register("stop recovery", () -> {
+            events.log(EventType.SHUTDOWN_STARTED);
             recovery.stop(); // first: nothing the recovery thread still starts can outlive the later steps
             return null;
         });
@@ -192,7 +224,8 @@ public final class AppContext implements AutoCloseable {
             return null;
         });
         coordinator.register("stop the feed simulator", () -> simulatorStopNote(simulator));
-        coordinator.register("stop the sweeper and the worker monitor", () -> {
+        coordinator.register("stop the sweeper, the worker monitor and the snapshot task", () -> {
+            snapshotTask.stop();
             sweeper.stop();
             if (orchestrator.monitor() != null) {
                 orchestrator.monitor().stop();
@@ -210,12 +243,24 @@ public final class AppContext implements AutoCloseable {
                 case INTERRUPTED -> "the shutdown caller was interrupted while waiting; the workers were interrupted without waiting for them to end, so it is not known that they ended; unfinished orders stay recoverable in the database";
             };
         });
-        // the final snapshot of in-flight orders is added by Phase 6 here
+        // best effort (SDD F-17): a snapshot that cannot be written is reported in the note and the shutdown goes on. With the
+        // embedded database and a JVM shutdown hook (Ctrl+C, SIGTERM) the database server may already be gone: MariaDB4j
+        // destroys its process in its own hook, and the order of JVM hooks is not defined (SDD 7.16.5)
+        coordinator.register("write the final snapshot", () -> {
+            try {
+                return "written " + snapshots.writeAndPrune().getFileName();
+            } catch (SnapshotWriteException e) {
+                String why = chain(e);
+                LOG.warn("The final snapshot was not written ({}); the database and the last periodic snapshot remain the recovery sources", why);
+                return "NOT WRITTEN (" + why + "); the database and the last periodic snapshot remain the recovery sources";
+            }
+        });
         coordinator.register("close the connection pool", () -> {
             pool.close();
             return null;
         });
         coordinator.register("close the event log", () -> {
+            events.log(EventType.SHUTDOWN_COMPLETED);
             events.close();
             return null;
         });
@@ -225,6 +270,16 @@ public final class AppContext implements AutoCloseable {
                 return null;
             });
         }
+    }
+
+    /** Class names of a failure and its causes, never messages (they may carry data). */
+    private static String chain(Throwable failure) {
+        StringBuilder text = new StringBuilder(failure.getClass().getSimpleName());
+        Throwable cause = failure.getCause();
+        for (int depth = 0; cause != null && depth < 5; depth++, cause = cause.getCause()) {
+            text.append(" <- ").append(cause.getClass().getSimpleName());
+        }
+        return text.toString();
     }
 
     /**
@@ -285,6 +340,22 @@ public final class AppContext implements AutoCloseable {
 
     public StockService stock() {
         return stock;
+    }
+
+    public NioOrderEventLog eventLog() {
+        return eventLog;
+    }
+
+    public SnapshotService snapshots() {
+        return snapshots;
+    }
+
+    public SnapshotTask snapshotTask() {
+        return snapshotTask;
+    }
+
+    public ReportService reports() {
+        return reports;
     }
 
     public ShutdownCoordinator shutdownCoordinator() {

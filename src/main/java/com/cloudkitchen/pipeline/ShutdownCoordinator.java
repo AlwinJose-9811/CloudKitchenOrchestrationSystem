@@ -113,7 +113,7 @@ public final class ShutdownCoordinator {
                     LOG.info("Shutdown step '{}' done in {} ms{}", named.name(), millisSince(stepBegin), note == null ? "" : " (" + note + ")");
                 } catch (Exception | Error e) {
                     results.add(new StepResult(named.name(), millisSince(stepBegin), true, e.getClass().getName()));
-                    LOG.error("Shutdown step '{}' failed: {}", named.name(), e.getClass().getName());
+                    LOG.error("Shutdown step '{}' failed: {}", named.name(), describe(e));
                 }
             }
         } finally {
@@ -153,6 +153,16 @@ public final class ShutdownCoordinator {
             // the JVM is already shutting down: the hook is running or about to run and finds the work done
         }
         hook = null;
+    }
+
+    /** The class names of a failure and of its causes (never messages: they may carry data); at most five levels. */
+    private static String describe(Throwable failure) {
+        StringBuilder text = new StringBuilder(failure.getClass().getName());
+        Throwable cause = failure.getCause();
+        for (int depth = 0; cause != null && depth < 5; depth++, cause = cause.getCause()) {
+            text.append(" <- ").append(cause.getClass().getName());
+        }
+        return text.toString();
     }
 
     private static long millisSince(long beginNanos) {

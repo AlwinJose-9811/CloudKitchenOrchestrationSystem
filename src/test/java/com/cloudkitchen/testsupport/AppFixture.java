@@ -3,6 +3,10 @@ package com.cloudkitchen.testsupport;
 import com.cloudkitchen.bootstrap.AppContext;
 import com.cloudkitchen.config.AppConfig;
 import com.cloudkitchen.exception.CloudKitchenException;
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Clock;
 import java.util.Properties;
 
@@ -25,6 +29,12 @@ public final class AppFixture {
         p.setProperty("shutdown.drain.seconds", "5");
         p.setProperty("shutdown.await.seconds", "5");
         p.setProperty("simulator.max.rate.per.minute", "6000");
+        // the order log, the snapshots and the reports of this application belong to this start, never to ./logs or ./snapshots,
+        // so that no test can restore another test's snapshot into the shared database
+        Path files = scratchDirectory();
+        p.setProperty("log.orders.path", files.resolve("logs").resolve("orders.log").toString());
+        p.setProperty("snapshot.dir", files.resolve("snapshots").toString());
+        p.setProperty("report.export.dir", files.resolve("reports").toString());
         p.setProperty("bootstrap.admin.username", "admin");
         p.setProperty("bootstrap.admin.password", TestDatabase.randomHex(16));
         p.setProperty("bootstrap.staff.username", "staff");
@@ -33,6 +43,17 @@ public final class AppFixture {
             p.setProperty(overrides[i], overrides[i + 1]);
         }
         return p;
+    }
+
+    /** A new empty directory under {@code data/test} (git-ignored) for the files of one application start. */
+    public static Path scratchDirectory() {
+        try {
+            Path parent = Path.of("data", "test").toAbsolutePath();
+            Files.createDirectories(parent);
+            return Files.createTempDirectory(parent, "app-files-");
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 
     /** A running application context on the test database; the caller closes it. */

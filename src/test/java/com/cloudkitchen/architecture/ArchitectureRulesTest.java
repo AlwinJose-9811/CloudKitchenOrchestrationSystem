@@ -415,6 +415,26 @@ class ArchitectureRulesTest {
     }
 
     @Test
+    void everyObjectInputStreamGetsTheAllowlistFilterBeforeItReadsAnything() {
+        List<String> offenders = new ArrayList<>();
+        for (Path file : javaFiles(MAIN)) {
+            String source = read(file);
+            if (source.contains("new ObjectInputStream") && !(source.contains("setObjectInputFilter") && source.contains("SnapshotFilterFactory"))) {
+                offenders.add(file.toString());
+            }
+        }
+        assertEquals(List.of(), offenders, "a stream is created only together with the filter of SnapshotFilterFactory");
+    }
+
+    @Test
+    void theFilePackagesDependOnlyOnTheirDeclaredNeighbours() {
+        assertImportsOnlyFrom("io", List.of("io", "exception", "dto", "domain.enums"), List.of());
+        // NamedThreadFactory is the one pipeline type the snapshot scheduler needs: every thread of the application is created through it
+        assertImportsOnlyFrom("snapshot", List.of("snapshot", "dao", "db", "domain", "domain.enums", "exception", "io"),
+                List.of("SnapshotTask.java -> com.cloudkitchen.pipeline.NamedThreadFactory"));
+    }
+
+    @Test
     void businessCodeDoesNotReadTheWallClockDirectly() {
         List<String> offenders = new ArrayList<>();
         for (Path file : javaFiles(MAIN)) {
