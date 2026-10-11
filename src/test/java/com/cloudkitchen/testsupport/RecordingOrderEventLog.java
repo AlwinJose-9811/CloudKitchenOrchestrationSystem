@@ -16,11 +16,22 @@ public class RecordingOrderEventLog implements OrderEventLog {
     private final List<Event> events = Collections.synchronizedList(new ArrayList<>());
     private final Object signal = new Object();
 
+    private volatile java.util.function.Consumer<Event> listener = e -> { };
+
+    /**
+     * Runs {@code listener} on the logging thread right after each event is recorded. A test uses it to pause one
+     * thread at a precise point of production code that logs (for example between two steps of a repair), with latches.
+     */
+    public void onEvent(java.util.function.Consumer<Event> listener) {
+        this.listener = java.util.Objects.requireNonNull(listener, "listener");
+    }
+
     private void added(Event event) {
         events.add(event);
         synchronized (signal) {
             signal.notifyAll();
         }
+        listener.accept(event);
     }
 
     @Override
@@ -111,5 +122,6 @@ public class RecordingOrderEventLog implements OrderEventLog {
 
     public void clear() {
         events.clear();
+        listener = e -> { };
     }
 }

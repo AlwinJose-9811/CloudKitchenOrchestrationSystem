@@ -120,6 +120,22 @@ public final class StationRuntime {
         return future;
     }
 
+    /** A worker and the future of the task that runs it, read together. */
+    record Observed(StationWorker worker, Future<?> future) {
+    }
+
+    /**
+     * The current worker and its future as one consistent pair. {@code OrderOrchestrator.restartWorker} installs the
+     * new worker and attaches its future one after the other while it holds {@link #lock()}; reading the two fields
+     * separately could pair the new worker with the old, finished future, and a repair would then take the healthy new
+     * worker for a dead one. This method takes the same lock, so it never sees the pair half replaced.
+     */
+    Observed observe() {
+        synchronized (lock) {
+            return new Observed(worker, future);
+        }
+    }
+
     /** Publishes the worker and its generation before the worker is submitted, so it never sees itself as stale. */
     void install(StationWorker next) {
         this.worker = next;

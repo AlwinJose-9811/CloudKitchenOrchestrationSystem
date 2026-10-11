@@ -25,6 +25,7 @@ import java.util.regex.Pattern;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 
@@ -250,7 +251,7 @@ class FeedSimulatorTest {
         }
     }
 
-    @Test
+    @RepeatedTest(20)
     void aTickThatIgnoresInterruptsCannotHoldStopOrShutdownBeyondTheBound() throws Exception {
         CountDownLatch insideTick = new CountDownLatch(1);
         CountDownLatch releaseTick = new CountDownLatch(1);
@@ -288,7 +289,7 @@ class FeedSimulatorTest {
         }
     }
 
-    @Test
+    @RepeatedTest(20)
     void aTickBlockedInsideASubmissionIsInterruptedByShutdownAndTheThreadEnds() throws Exception {
         CountDownLatch insideSubmit = new CountDownLatch(1);
         CountDownLatch never = new CountDownLatch(1);

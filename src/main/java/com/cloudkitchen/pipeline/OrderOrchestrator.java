@@ -204,15 +204,18 @@ public final class OrderOrchestrator implements OrderDispatcher {
         if (stopping || !started || runtime.isDead()) {
             return;
         }
-        StationWorker worker = runtime.worker();
-        Future<?> future = runtime.future();
+        StationRuntime.Observed seen = runtime.observe();
+        StationWorker worker = seen.worker();
+        Future<?> future = seen.future();
         boolean done = future != null && future.isDone();
         boolean healthy = !done && worker.isHealthy(clock.millis(), cfg.stallMs());
         if (!healthy) {
             String reason = done ? "DIED " + causeOf(future) : "STALLED";
             events.log(done ? EventType.WORKER_DIED : EventType.WORKER_STALLED, 0L, "station=" + runtime.code());
             LOG.error("Worker {} is {}", worker.owner(), reason);
-            restartWorker(runtime.code(), runtime.currentGeneration(), reason);
+            // the restart is conditional on the generation that was observed: if another repair has replaced that
+            // worker meanwhile, restartWorker refuses and the healthy replacement is left alone
+            restartWorker(runtime.code(), worker.generation(), reason);
         }
         StationWorker current = runtime.worker();
         if (!runtime.isDead() && current.isHealthy(clock.millis(), cfg.stallMs())) {

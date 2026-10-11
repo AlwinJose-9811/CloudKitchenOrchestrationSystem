@@ -211,7 +211,7 @@ class GracefulShutdownTest {
         awaitOwnedThreadsGone();
     }
 
-    @Test
+    @RepeatedTest(20)
     void aCallerInterruptedWhileTheWorkersAreBeingDrainedGetsTheInterruptedOutcomeAndTheShutdownStillCompletes() throws Exception {
         h.reset();
         // a worker inside a 60 s delivery step and a 30 s + 30 s wait: without the interrupt this shutdown would take a minute

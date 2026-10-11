@@ -191,8 +191,7 @@ public final class AppContext implements AutoCloseable {
             orderService.setAccepting(false);
             return null;
         });
-        coordinator.register("stop the feed simulator", () -> simulator.shutdown() ? null
-                : "the simulator thread is still inside a blocked submission; it was interrupted and ends when that call returns, the shutdown went on");
+        coordinator.register("stop the feed simulator", () -> simulatorStopNote(simulator));
         coordinator.register("stop the sweeper and the worker monitor", () -> {
             sweeper.stop();
             if (orchestrator.monitor() != null) {
@@ -226,6 +225,22 @@ public final class AppContext implements AutoCloseable {
                 return null;
             });
         }
+    }
+
+    /**
+     * Stops the simulator and describes the result for the shutdown record, or {@code null} if its thread ended.
+     * {@link FeedSimulator#shutdown()} also returns {@code false} when the calling thread was interrupted (and then sets
+     * its flag again), so the flag tells the two causes apart: the coordinator clears it before every step, so inside
+     * the step it can only have been set by an interrupt during this step.
+     */
+    static String simulatorStopNote(FeedSimulator simulator) {
+        if (simulator.shutdown()) {
+            return null;
+        }
+        if (Thread.currentThread().isInterrupted()) {
+            return "the shutdown caller was interrupted while the simulator was stopping; it is not known whether the simulator thread ended, the shutdown went on";
+        }
+        return "the simulator thread is still inside a blocked submission; it was interrupted and ends when that call returns, the shutdown went on";
     }
 
     public Database database() {

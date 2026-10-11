@@ -262,7 +262,7 @@ Plus G-SECRET, G-TREE, G-TAG (`phase-4-complete`).
 - [x] Recovery after abrupt stop proven (orders in every non-terminal status complete after restart), including simulated crashes after TX1, after `offer`, after ROUTED and during compensation, with stock deducted/restored exactly once. **Met (EV-033).**
 - [x] With the worker monitor stopped, one sweeper pass restarts a killed worker (once, compare-and-set on the generation) and recovers the lost id (`MonitorDeathSweeperRecoveryTest`). **Met (EV-037).**
 - [x] Sweeper never re-enqueues queued/active/paused/parked/fresh/pending-compensation orders, never causes a duplicate edge or double restore (`OrphanSweeperRaceTest` 20/20). **Met (EV-037).**
-- [x] Shutdown triggered twice runs once; bounded by configured timeouts; no leaked threads. **Met (EV-035).**
+- [x] Shutdown triggered twice runs once; each step has a configured or fixed wait limit; no leaked threads. **Met (EV-035)**, with the qualification found by the post-audit review: the `drain + await + 5 s` total is proved only for the tested stuck-worker scenario and there is no universal bound (SDD 7.15.3, EV-045).
 - [x] Metrics invariant holds at quiescence. **Met (EV-036).**
 - [x] Three consecutive full builds green; concurrency tests 20/20. **Met (EV-039)**, with one correction found by the post-audit review: two concurrent tests (`SimulatorInventoryReconciliationTest`, the concurrent-callers test of `GracefulShutdownTest`) had run once per build; they are 20/20 since the hardening pass (EV-042, EV-044).
 
@@ -275,6 +275,7 @@ Plus G-SECRET, G-TREE, G-TAG (`phase-4-complete`).
 - [x] H6 `RecoveryService` failure isolation and bounded retry; the application opens only after a complete recovery. **Done (EV-043).**
 - [x] H7 Roadmap, traceability, evidence and viva notes consistent; limitations recorded. **Done.**
 - [x] H8 Three consecutive full builds on the final code. **Met (EV-044).**
+- [x] H9 (follow-up, uncommitted) `repairStation` acts on the worker it observed; regression test `RepairRaceTest`; three consecutive green builds with 1802 tests. **Done (EV-045, EV-046).**
 
 ### Gate commands
 ```

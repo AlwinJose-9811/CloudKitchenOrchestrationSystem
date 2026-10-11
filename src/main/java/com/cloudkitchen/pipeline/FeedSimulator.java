@@ -276,7 +276,8 @@ public final class FeedSimulator {
      * restores the interrupt flag if interrupted.
      *
      * @return {@code true} if the simulator thread has ended; {@code false} if a tick ignored the interrupt (the thread
-     *         ends when that call returns) or the caller was interrupted
+     *         ends when that call returns) or if the caller was interrupted while the thread was still alive (the
+     *         caller's flag is then set again; a caller interrupted after the thread ended still gets {@code true})
      */
     public boolean shutdown() {
         stop();
