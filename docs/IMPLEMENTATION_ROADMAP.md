@@ -264,7 +264,17 @@ Plus G-SECRET, G-TREE, G-TAG (`phase-4-complete`).
 - [x] Sweeper never re-enqueues queued/active/paused/parked/fresh/pending-compensation orders, never causes a duplicate edge or double restore (`OrphanSweeperRaceTest` 20/20). **Met (EV-037).**
 - [x] Shutdown triggered twice runs once; bounded by configured timeouts; no leaked threads. **Met (EV-035).**
 - [x] Metrics invariant holds at quiescence. **Met (EV-036).**
-- [x] Three consecutive full builds green; concurrency tests 20/20. **Met (EV-039).**
+- [x] Three consecutive full builds green; concurrency tests 20/20. **Met (EV-039)**, with one correction found by the post-audit review: two concurrent tests (`SimulatorInventoryReconciliationTest`, the concurrent-callers test of `GracefulShutdownTest`) had run once per build; they are 20/20 since the hardening pass (EV-042, EV-044).
+
+### Hardening pass after the Phase 5 audit (2026-10-11, tag `phase-5-hardening-complete`; SDD 7.15.6, D-060..D-064)
+- [x] H1 `FeedSimulator.stop()`/`shutdown()` bounded; the coordinator step records a thread that did not end. **Done (EV-040).**
+- [x] H2 `StopOutcome.INTERRUPTED` and its message; a test interrupts the shutdown caller during the real worker drain. **Done (EV-041).**
+- [x] H3 `SimulatorInventoryReconciliationTest` deterministic (held / cancelled / compensated / delivered), no vacuous assertion. **Done (EV-042).**
+- [x] H4 The simulator reconciliation test and the concurrent-callers shutdown test run `@RepeatedTest(20)`, 20/20. **Done (EV-042, EV-044).**
+- [x] H5 SDD 7.15.3 (stop-recovery step, shutdown bound), 7.15.4 (metrics invariant qualifications, per-worker counter) corrected. **Done.**
+- [x] H6 `RecoveryService` failure isolation and bounded retry; the application opens only after a complete recovery. **Done (EV-043).**
+- [x] H7 Roadmap, traceability, evidence and viva notes consistent; limitations recorded. **Done.**
+- [x] H8 Three consecutive full builds on the final code. **Met (EV-044).**
 
 ### Gate commands
 ```

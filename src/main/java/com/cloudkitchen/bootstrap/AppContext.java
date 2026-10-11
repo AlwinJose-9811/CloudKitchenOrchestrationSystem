@@ -191,10 +191,8 @@ public final class AppContext implements AutoCloseable {
             orderService.setAccepting(false);
             return null;
         });
-        coordinator.register("stop the feed simulator", () -> {
-            simulator.shutdown();
-            return null;
-        });
+        coordinator.register("stop the feed simulator", () -> simulator.shutdown() ? null
+                : "the simulator thread is still inside a blocked submission; it was interrupted and ends when that call returns, the shutdown went on");
         coordinator.register("stop the sweeper and the worker monitor", () -> {
             sweeper.stop();
             if (orchestrator.monitor() != null) {
@@ -210,6 +208,7 @@ public final class AppContext implements AutoCloseable {
                 case STOPPED -> "drain time elapsed, workers stopped after their current order; queued orders stay recoverable in the database";
                 case FORCED -> "workers were still busy after the drain and await times and were interrupted; unfinished orders stay recoverable in the database";
                 case NOT_TERMINATED -> "some worker threads did not end even after the interrupt; unfinished orders stay recoverable in the database";
+                case INTERRUPTED -> "the shutdown caller was interrupted while waiting; the workers were interrupted without waiting for them to end, so it is not known that they ended; unfinished orders stay recoverable in the database";
             };
         });
         // the final snapshot of in-flight orders is added by Phase 6 here

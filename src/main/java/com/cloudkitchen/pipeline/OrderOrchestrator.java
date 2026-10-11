@@ -332,7 +332,7 @@ public final class OrderOrchestrator implements OrderDispatcher {
     }
 
     // ------------------------------------------------------------------------------------------------------
-    // Stop (SDD 7.6 steps 4-6; the coordinator that calls it arrives in Phase 5)
+    // Stop (SDD 7.6 step 4; called by the ShutdownCoordinator step "drain and stop the workers")
     // ------------------------------------------------------------------------------------------------------
 
     /** How a stop ended, from the gentlest to the worst. */
@@ -344,22 +344,31 @@ public final class OrderOrchestrator implements OrderDispatcher {
         /** Some worker was still busy after both waits and was interrupted ({@code shutdownNow}); its order stays recoverable. */
         FORCED,
         /** Some worker thread did not end even after the interrupt (a hung thread cannot be killed in Java). */
-        NOT_TERMINATED
+        NOT_TERMINATED,
+        /**
+         * The thread that called {@code stop} was itself interrupted while it waited for the workers. The workers were
+         * interrupted at once ({@code shutdownNow}) and not waited for, so whether they ended is unknown; their unfinished
+         * orders stay recoverable in the database. The caller's interrupt flag is set again.
+         */
+        INTERRUPTED
     }
 
     /**
-     * {@link #stop} reduced to "did every worker thread end".
+     * {@link #stop} reduced to "is it known that every worker thread ended".
      *
-     * @return {@code true} unless a worker thread outlived the interrupt
+     * @return {@code false} if a worker thread outlived the interrupt or the caller was interrupted before it could find out
      */
     public boolean shutdownGracefully(Duration drain, Duration await) {
-        return stop(drain, await) != StopOutcome.NOT_TERMINATED;
+        StopOutcome outcome = stop(drain, await);
+        return outcome != StopOutcome.NOT_TERMINATED && outcome != StopOutcome.INTERRUPTED;
     }
 
     /**
      * Stops accepting new ids, lets the workers drain their queues for up to {@code drain}, then asks them to stop and
      * waits up to {@code await}, and finally interrupts what is left. Orders not finished stay non-terminal in the
      * database and are recovered at the next start; the monitor is stopped first so that nothing is restarted meanwhile.
+     * If the calling thread is interrupted while it waits, the workers are interrupted at once, the caller's flag is
+     * restored and the result is {@link StopOutcome#INTERRUPTED}.
      */
     public StopOutcome stop(Duration drain, Duration await) {
         ThreadPoolExecutor pool = executor;
@@ -390,7 +399,8 @@ public final class OrderOrchestrator implements OrderDispatcher {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             pool.shutdownNow();
-            return StopOutcome.NOT_TERMINATED;
+            LOG.warn("The thread stopping the workers was interrupted; the workers were interrupted without waiting for them to end");
+            return StopOutcome.INTERRUPTED;
         } finally {
             for (StationRuntime runtime : runtimes.values()) {
                 runtime.close();

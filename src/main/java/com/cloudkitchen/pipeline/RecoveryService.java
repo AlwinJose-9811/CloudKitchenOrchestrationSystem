@@ -7,8 +7,11 @@ import com.cloudkitchen.exception.InvalidStatusTransitionException;
 import com.cloudkitchen.io.EventType;
 import com.cloudkitchen.io.OrderEventLog;
 import com.cloudkitchen.service.OrderService;
+import java.time.Duration;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
@@ -27,7 +30,17 @@ import org.slf4j.LoggerFactory;
  *       moved to {@code FAILED} with note {@code STATION_UNAVAILABLE} (stock restored only from {@code VALIDATED} or
  *       {@code ROUTED}). Terminal orders and orders still pending are never loaded.</li>
  * </ol>
- * Enqueuing is not a side effect (7.9.5): any number of duplicate entries, a repeated recovery or a worker that is
+ *
+ * <p>Failures (SDD 7.15.6): a failure while handling <em>one</em> order is recorded and the loop goes on with the
+ * orders after it; a transient database error in any step ends the round and, up to {@link Retry#maxAttempts()}
+ * rounds with a growing pause, the round is repeated on the same thread (so there is never a second recovery loop).
+ * A repeated round does not clear the leases again (that would strip leases from orders the workers have already
+ * taken) and skips every order already handed back. Recovery is complete only when every recoverable order was
+ * handed back, failed for a missing station, or deliberately left (the documented {@code PACKED} and {@code DEAD}
+ * cases); otherwise {@link #recover()} throws, {@link #succeeded()} stays {@code false}, the {@code afterwards}
+ * action never runs and the application keeps refusing orders.
+ *
+ * <p>Enqueuing is not a side effect (7.9.5): any number of duplicate entries, a repeated recovery or a worker that is
  * already running changes nothing, because every real effect needs a conditional update that changes one row. A
  * {@code VALIDATED} order is routed by the worker itself (RR-3); recovery never calls a transition for it.
  *
@@ -48,15 +61,44 @@ public final class RecoveryService {
         int run() throws CloudKitchenException;
     }
 
+    /** Bounded retry of rounds that hit a transient database error: {@code maxAttempts} rounds in all, pauses doubling from {@code baseBackoff} up to 8 s. */
+    public record Retry(int maxAttempts, Duration baseBackoff) {
+        public static final Retry DEFAULT = new Retry(4, Duration.ofMillis(500));
+        private static final Duration CAP = Duration.ofSeconds(8);
+
+        public Retry {
+            if (maxAttempts < 1 || baseBackoff == null || baseBackoff.isNegative()) {
+                throw new IllegalArgumentException("maxAttempts must be at least 1 and baseBackoff not negative");
+            }
+        }
+
+        Duration pauseAfter(int failedAttempt) {
+            Duration delay = baseBackoff.multipliedBy(1L << Math.min(Math.max(failedAttempt - 1, 0), 20));
+            return delay.compareTo(CAP) > 0 ? CAP : delay;
+        }
+    }
+
+    /** How recovery waits between rounds; tests replace it so that no real time passes. */
+    @FunctionalInterface
+    public interface Pause {
+        Pause SLEEP = d -> TimeUnit.MILLISECONDS.sleep(d.toMillis());
+
+        void pause(Duration duration) throws InterruptedException;
+    }
+
     /** What recovery did; an immutable copy. */
     public record Stats(boolean recovering, long enqueued, long failedStationUnavailable, long compensationsResolved,
-                        long compensationsStillPending, long skippedUnavailable, long snapshotInserted) {
+                        long compensationsStillPending, long skippedUnavailable, long snapshotInserted,
+                        int attempts, long orderFailures, boolean succeeded) {
     }
 
     private final OrderService orders;
     private final OrderOrchestrator orchestrator;
     private final OrderEventLog events;
     private final SnapshotStep snapshot;
+    private final Retry retry;
+    private final Pause pause;
+    private final Set<Long> handedBack = new HashSet<>();
     private final CountDownLatch done = new CountDownLatch(1);
     private final AtomicLong enqueued = new AtomicLong();
     private final AtomicLong failedUnavailable = new AtomicLong();
@@ -65,10 +107,23 @@ public final class RecoveryService {
     private final AtomicLong skipped = new AtomicLong();
     private final AtomicLong inserted = new AtomicLong();
 
+    private final AtomicLong orderFailures = new AtomicLong();
+    private volatile int attempts;
     private volatile boolean recovering = true;
+    private volatile boolean succeeded;
+    // state of the run in progress; touched only by the thread that runs recover()
+    private boolean leasesCleared;
+    private boolean lastRoundHadTransientFailure;
     private Thread thread;
 
     public RecoveryService(OrderService orders, OrderOrchestrator orchestrator, OrderEventLog events, SnapshotStep snapshot) {
+        this(orders, orchestrator, events, snapshot, Retry.DEFAULT, Pause.SLEEP);
+    }
+
+    public RecoveryService(OrderService orders, OrderOrchestrator orchestrator, OrderEventLog events, SnapshotStep snapshot,
+                           Retry retry, Pause pause) {
+        this.retry = Objects.requireNonNull(retry, "retry");
+        this.pause = Objects.requireNonNull(pause, "pause");
         this.orders = Objects.requireNonNull(orders, "orders");
         this.orchestrator = Objects.requireNonNull(orchestrator, "orchestrator");
         this.events = Objects.requireNonNull(events, "events");
@@ -87,7 +142,9 @@ public final class RecoveryService {
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 LOG.warn("Recovery was interrupted; the remaining orders stay in the database for the next start");
-            } catch (CloudKitchenException | RuntimeException e) {
+            } catch (CloudKitchenException e) {
+                LOG.error("Recovery failed ({}); the application keeps refusing orders", e.getCode());
+            } catch (RuntimeException e) {
                 LOG.error("Recovery failed ({}); the application keeps refusing orders", e.getClass().getName());
             }
         }, "recovery-loader");
@@ -126,26 +183,54 @@ public final class RecoveryService {
         return recovering;
     }
 
-    public Stats stats() {
-        return new Stats(recovering, enqueued.get(), failedUnavailable.get(), resolved.get(), stillPending.get(), skipped.get(), inserted.get());
+    /** {@code true} once a run handed back every recoverable order (see the class comment); {@code false} before and after a failed run. */
+    public boolean succeeded() {
+        return succeeded;
     }
 
-    /** The four steps; safe to call again (a second run finds nothing new to do). */
+    public Stats stats() {
+        return new Stats(recovering, enqueued.get(), failedUnavailable.get(), resolved.get(), stillPending.get(), skipped.get(),
+                inserted.get(), attempts, orderFailures.get(), succeeded);
+    }
+
+    /**
+     * The four steps with bounded retry; safe to call again after a successful run (a second run finds nothing new to
+     * do). Throws if the run could not hand back every order, after every other order has been handled.
+     */
     public void recover() throws CloudKitchenException, InterruptedException {
         try {
             events.log(EventType.RECOVERY_STARTED);
+            handedBack.clear();
+            leasesCleared = false;
+            succeeded = false;
             inserted.addAndGet(snapshot.run());
-            int cleared = orders.clearAllLeases();
-            LOG.info("Recovery: {} stale leases cleared", cleared);
-            resolvePendingCompensations();
-            List<RecoverableOrder> candidates = orders.findRecoverableOrders();
-            for (RecoverableOrder order : candidates) {
-                if (Thread.currentThread().isInterrupted() || orchestrator.isStopping()) {
-                    throw new InterruptedException("recovery stopped before every order was handed back");
+            int round = 0;
+            while (true) {
+                round++;
+                attempts = round;
+                CloudKitchenException failure;
+                boolean retryable;
+                try {
+                    int unresolved = round();
+                    if (unresolved == 0) {
+                        break;
+                    }
+                    failure = new CloudKitchenException("RECOVERY_INCOMPLETE", unresolved + " recoverable orders could not be handed back");
+                    retryable = lastRoundHadTransientFailure;
+                } catch (CloudKitchenException e) {
+                    failure = e;
+                    retryable = OrderService.isTransientFailure(e);
                 }
-                reenqueueOrFail(order);
+                if (!retryable || round >= retry.maxAttempts()) {
+                    LOG.error("Recovery gave up after {} round(s): {}", round, failure.getCode());
+                    throw failure;
+                }
+                Duration wait = retry.pauseAfter(round);
+                LOG.warn("Recovery round {} hit a transient database error ({}); repeating in {} ms", round, failure.getCode(), wait.toMillis());
+                pause.pause(wait);
             }
-            events.log(EventType.RECOVERY_COMPLETED, 0L, "orders=" + candidates.size());
+            succeeded = true;
+            events.log(EventType.RECOVERY_COMPLETED, 0L, "orders=" + handedBack.size());
             LOG.info("Recovery finished: {} enqueued, {} failed (station unavailable), {} compensations resolved",
                     enqueued.get(), failedUnavailable.get(), resolved.get());
         } finally {
@@ -154,14 +239,57 @@ public final class RecoveryService {
         }
     }
 
-    private void resolvePendingCompensations() throws CloudKitchenException {
-        for (long id : orders.findPendingCompensationIds()) {
-            if (orders.completePendingCompensation(id)) {
-                resolved.incrementAndGet();
-            } else {
-                stillPending.incrementAndGet(); // the marker stays; the sweeper keeps retrying with backoff
+    /** One round of steps 2-4; returns the number of orders whose handling failed in it (they are tried again by the next round). */
+    private int round() throws CloudKitchenException, InterruptedException {
+        lastRoundHadTransientFailure = false;
+        if (!leasesCleared) {
+            int cleared = orders.clearAllLeases();
+            leasesCleared = true; // never again: later rounds would strip the leases of orders the workers already took
+            LOG.info("Recovery: {} stale leases cleared", cleared);
+        }
+        int unresolved = resolvePendingCompensations();
+        List<RecoverableOrder> candidates = orders.findRecoverableOrders();
+        for (RecoverableOrder order : candidates) {
+            if (handedBack.contains(order.id())) {
+                continue;
+            }
+            if (Thread.currentThread().isInterrupted() || orchestrator.isStopping()) {
+                throw new InterruptedException("recovery stopped before every order was handed back");
+            }
+            try {
+                reenqueueOrFail(order);
+                handedBack.add(order.id());
+            } catch (CloudKitchenException | RuntimeException e) {
+                unresolved += recordOrderFailure(order.id(), e);
             }
         }
+        return unresolved;
+    }
+
+    private int recordOrderFailure(long orderId, Exception e) {
+        orderFailures.incrementAndGet();
+        lastRoundHadTransientFailure |= OrderService.isTransientFailure(e);
+        LOG.error("Recovery could not hand back order {} ({}); the other orders are not affected", orderId, e.getClass().getName());
+        return 1;
+    }
+
+    private int resolvePendingCompensations() throws CloudKitchenException {
+        int unresolved = 0;
+        long stillOpen = 0;
+        for (long id : orders.findPendingCompensationIds()) {
+            try {
+                if (orders.completePendingCompensation(id)) {
+                    resolved.incrementAndGet();
+                } else {
+                    stillOpen++; // the marker stays; the sweeper keeps retrying with backoff
+                }
+            } catch (CloudKitchenException e) {
+                unresolved += recordOrderFailure(id, e);
+                stillOpen++;
+            }
+        }
+        stillPending.set(stillOpen);
+        return unresolved;
     }
 
     /**

@@ -25,6 +25,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 
@@ -115,7 +116,7 @@ class GracefulShutdownTest {
         awaitOwnedThreadsGone();
     }
 
-    @Test
+    @RepeatedTest(20)
     void aShutdownTriggeredByTheListenerAndByTheJvmHookAtTheSameTimeRunsOnce() throws Exception {
         h.reset();
         AppContext app = AppFixture.start(h.db, true);
@@ -207,6 +208,70 @@ class GracefulShutdownTest {
         assertTrue(app.shutdownCoordinator().outcome().complete());
         assertTrue(app.shutdownCoordinator().outcome().steps().stream().noneMatch(ShutdownCoordinator.StepResult::failed),
                 "the pool and the workers were still closed: " + app.shutdownCoordinator().outcome());
+        awaitOwnedThreadsGone();
+    }
+
+    @Test
+    void aCallerInterruptedWhileTheWorkersAreBeingDrainedGetsTheInterruptedOutcomeAndTheShutdownStillCompletes() throws Exception {
+        h.reset();
+        // a worker inside a 60 s delivery step and a 30 s + 30 s wait: without the interrupt this shutdown would take a minute
+        AppContext app = AppFixture.start(h.db, false, "worker.delivery.ms", "60000", "shutdown.drain.seconds", "30", "shutdown.await.seconds", "30");
+        assertTrue(app.awaitReady(60, TimeUnit.SECONDS));
+        SubmissionResult r = app.orders().submitOrder(h.t.request(OrderSource.ZOMATO, "GS-INT", "BIRYANI", "Chicken Biryani", 1));
+        assertEquals(SubmissionResult.Outcome.ACCEPTED, r.outcome());
+        long id = r.orderId();
+        assertTrue(PipelineHarness.awaitCondition(Duration.ofSeconds(30), () -> {
+            try {
+                return "OUT_FOR_DELIVERY".equals(h.t.text("SELECT status FROM orders WHERE id = ?", id));
+            } catch (Exception e) {
+                return false;
+            }
+        }), "the worker is inside its 60 s delivery step");
+
+        java.util.concurrent.atomic.AtomicBoolean flagAfterClose = new java.util.concurrent.atomic.AtomicBoolean();
+        Thread closer = new Thread(() -> {
+            app.close();
+            flagAfterClose.set(Thread.currentThread().isInterrupted());
+        }, "test-closer");
+        long begin = System.nanoTime();
+        closer.start();
+        // the closer has reached the real drain wait: the orchestrator is stopping and the thread waits with a timeout in awaitTermination
+        assertTrue(PipelineHarness.awaitCondition(Duration.ofSeconds(30),
+                () -> app.orchestrator().isStopping() && closer.getState() == Thread.State.TIMED_WAITING),
+                "the shutdown is waiting for the workers to drain");
+        closer.interrupt();
+        closer.join(30_000);
+        assertFalse(closer.isAlive(), "the interrupt ended the wait");
+        long millis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - begin);
+        assertTrue(millis < 20_000, "far less than the 60 s the drain and await times would allow, took " + millis + " ms");
+
+        ShutdownCoordinator.Outcome outcome = app.shutdownCoordinator().outcome();
+        assertTrue(outcome.complete());
+        assertTrue(outcome.steps().stream().noneMatch(ShutdownCoordinator.StepResult::failed), "every later step still ran: " + outcome);
+        ShutdownCoordinator.StepResult drain = outcome.steps().stream().filter(s -> s.name().equals("drain and stop the workers")).findFirst().orElseThrow();
+        assertTrue(drain.note().contains("caller was interrupted"), "the outcome says what happened: " + drain.note());
+        assertFalse(drain.note().contains("did not end even after"), "and does not claim a hung worker: " + drain.note());
+        assertTrue(flagAfterClose.get(), "the closer's interrupt flag was restored when the shutdown returned");
+        assertEquals(List.of("stop recovery", "stop accepting orders", "stop the feed simulator", "stop the sweeper and the worker monitor",
+                "drain and stop the workers", "close the connection pool", "close the event log"),
+                outcome.steps().stream().map(ShutdownCoordinator.StepResult::name).toList());
+        assertThrows(PersistenceException.class, () -> app.database().withConnection(c -> 1), "the pool was closed after the workers");
+        assertEquals("OUT_FOR_DELIVERY", h.t.text("SELECT status FROM orders WHERE id = ?", id), "unfinished and recoverable");
+        awaitOwnedThreadsGone();
+
+        AppContext next = AppFixture.start(h.db, false);
+        try {
+            assertTrue(next.awaitReady(60, TimeUnit.SECONDS));
+            assertTrue(PipelineHarness.awaitCondition(Duration.ofSeconds(30), () -> {
+                try {
+                    return "DELIVERED".equals(h.t.text("SELECT status FROM orders WHERE id = ?", id));
+                } catch (Exception e) {
+                    return false;
+                }
+            }), "the next start resumed the order");
+        } finally {
+            next.close();
+        }
         awaitOwnedThreadsGone();
     }
 

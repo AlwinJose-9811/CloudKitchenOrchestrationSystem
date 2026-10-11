@@ -15,6 +15,7 @@ import com.cloudkitchen.service.OrderService;
 import com.cloudkitchen.service.RoutingService;
 import java.math.BigDecimal;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -28,6 +29,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.locks.ReentrantLock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -40,11 +42,21 @@ import org.slf4j.LoggerFactory;
  * {@link #shutdown()}. The task is scheduled with a fixed delay, so ticks never overlap and the work per minute is
  * bounded by the rate (itself bounded by {@code simulator.max.rate.per.minute}). A tick catches every exception: an
  * uncaught one would silently cancel the schedule. {@link #stop()} cancels the schedule and waits for a tick that is
- * already running, so that after it returns nothing more is produced.
+ * already running, so that after it returns no new tick starts.
+ *
+ * <p>Bounded stop: a tick can be blocked inside {@code submitOrder} (a database stall, a full queue). {@link #stop()}
+ * waits for it at most {@code stopWait} (default 2 s); if the tick is still running then, {@code stop()} returns anyway
+ * (no new tick starts, because {@code running} is already false), logs a warning and {@link #isTickRunning()} stays
+ * true. {@link #shutdown()} then interrupts the thread ({@code shutdownNow}) and waits at most {@code stopWait} more;
+ * it returns {@code false} if the thread is still alive. Such a tick can finish its one submission later: the
+ * coordinator has stopped accepting orders before this step, so that submission is answered {@code SHUTTING_DOWN}
+ * unless it already passed that check, in which case its transaction either commits (the order is recovered by the
+ * next start) or fails because the pool is closed (no order is created). The thread ends as soon as the call returns.
  */
 public final class FeedSimulator {
 
     private static final Logger LOG = LoggerFactory.getLogger(FeedSimulator.class);
+    private static final Duration DEFAULT_STOP_WAIT = Duration.ofSeconds(2);
 
     /** The test seam that decides what the next simulated order looks like. */
     @FunctionalInterface
@@ -63,7 +75,8 @@ public final class FeedSimulator {
     private final Clock clock;
     private final OrderEventLog events;
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(new NamedThreadFactory("feed-simulator", false));
-    private final Object tickLock = new Object();
+    private final ReentrantLock tickLock = new ReentrantLock();
+    private final Duration stopWait;
     private final AtomicLong sequence = new AtomicLong();
     private final AtomicLong produced = new AtomicLong();
     private final AtomicLong accepted = new AtomicLong();
@@ -77,6 +90,16 @@ public final class FeedSimulator {
 
     public FeedSimulator(OrderService orders, OrderGenerator generator, int defaultRatePerMinute, int maxRatePerMinute,
                          Clock clock, OrderEventLog events) {
+        this(orders, generator, defaultRatePerMinute, maxRatePerMinute, clock, events, DEFAULT_STOP_WAIT);
+    }
+
+    /** As above with an explicit bound for {@link #stop()} and {@link #shutdown()} (tests use a short one). */
+    public FeedSimulator(OrderService orders, OrderGenerator generator, int defaultRatePerMinute, int maxRatePerMinute,
+                         Clock clock, OrderEventLog events, Duration stopWait) {
+        if (stopWait == null || stopWait.isNegative() || stopWait.isZero()) {
+            throw new IllegalArgumentException("stopWait must be positive");
+        }
+        this.stopWait = stopWait;
         this.orders = Objects.requireNonNull(orders, "orders");
         this.generator = Objects.requireNonNull(generator, "generator");
         this.maxRatePerMinute = maxRatePerMinute;
@@ -142,7 +165,10 @@ public final class FeedSimulator {
         return true;
     }
 
-    /** Stops producing and waits for a tick that is already running; {@code false} if it was not running. */
+    /**
+     * Stops producing and waits, for at most the stop bound, for a tick that is already running; {@code false} if it was
+     * not running. Returns after the bound even if the tick is still blocked (see the class comment).
+     */
     public boolean stop() {
         ScheduledFuture<?> cancelled;
         synchronized (this) {
@@ -156,9 +182,7 @@ public final class FeedSimulator {
         if (cancelled != null) {
             cancelled.cancel(false);
         }
-        synchronized (tickLock) {
-            // a tick that had already started has finished once this lock is free; later ticks see running == false
-        }
+        awaitRunningTick();
         events.log(EventType.SIMULATOR_STOPPED, 0L, "produced=" + produced.get());
         return true;
     }
@@ -183,6 +207,24 @@ public final class FeedSimulator {
         return running;
     }
 
+    /** Whether a tick is executing right now (it is still blocked if this stays true after {@link #stop()} returned). */
+    public boolean isTickRunning() {
+        return tickLock.isLocked();
+    }
+
+    /** A tick that had already started has finished once the lock is free; later ticks see {@code running == false}. */
+    private void awaitRunningTick() {
+        try {
+            if (tickLock.tryLock(stopWait.toMillis(), TimeUnit.MILLISECONDS)) {
+                tickLock.unlock();
+            } else {
+                LOG.warn("A simulator tick is still running after {} ms; stopping without it", stopWait.toMillis());
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
     public int getRate() {
         return ratePerMinute;
     }
@@ -198,10 +240,13 @@ public final class FeedSimulator {
 
     /** One scheduled production step; runs on the simulator thread, one at a time, and never throws. */
     void tick() {
-        synchronized (tickLock) {
+        tickLock.lock();
+        try {
             if (running) {
                 produceOne();
             }
+        } finally {
+            tickLock.unlock();
         }
     }
 
@@ -226,16 +271,24 @@ public final class FeedSimulator {
         }
     }
 
-    /** Ends the scheduler thread; the simulator cannot be started afterwards. Restores the interrupt flag if interrupted. */
-    public void shutdown() {
+    /**
+     * Ends the scheduler thread; the simulator cannot be started afterwards. Takes at most twice the stop bound and
+     * restores the interrupt flag if interrupted.
+     *
+     * @return {@code true} if the simulator thread has ended; {@code false} if a tick ignored the interrupt (the thread
+     *         ends when that call returns) or the caller was interrupted
+     */
+    public boolean shutdown() {
         stop();
         scheduler.shutdownNow();
         try {
-            if (!scheduler.awaitTermination(5, TimeUnit.SECONDS)) {
-                LOG.warn("The feed simulator thread did not end within 5 seconds");
+            if (scheduler.awaitTermination(stopWait.toMillis(), TimeUnit.MILLISECONDS)) {
+                return true;
             }
+            LOG.warn("The feed simulator thread did not end within {} ms", stopWait.toMillis());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
+        return false;
     }
 }

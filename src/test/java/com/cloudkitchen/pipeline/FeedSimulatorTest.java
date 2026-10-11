@@ -219,8 +219,8 @@ class FeedSimulatorTest {
             sim.start(6000);
             assertTrue(insideTick.await(10, TimeUnit.SECONDS));
             stopper.start();
-            assertTrue(PipelineHarness.awaitCondition(Duration.ofSeconds(10), () -> stopper.getState() == Thread.State.BLOCKED),
-                    "stop() is waiting for the running tick");
+            assertTrue(PipelineHarness.awaitCondition(Duration.ofSeconds(10), () -> stopper.getState() == Thread.State.TIMED_WAITING),
+                    "stop() is waiting (bounded) for the running tick");
             releaseTick.countDown();
             stopper.join(10_000);
             assertFalse(stopper.isAlive());
@@ -229,6 +229,93 @@ class FeedSimulatorTest {
             assertEquals(callsAtStop, calls.get(), "no tick started after stop() returned");
         } finally {
             releaseTick.countDown();
+            sim.shutdown();
+        }
+    }
+
+    /** Waits on the latch and ignores interrupts, like a call stuck in a blocking driver; returns when released. */
+    private static void awaitIgnoringInterrupts(CountDownLatch latch) {
+        boolean interrupted = false;
+        while (true) {
+            try {
+                if (latch.await(30, TimeUnit.SECONDS)) {
+                    break;
+                }
+            } catch (InterruptedException e) {
+                interrupted = true;
+            }
+        }
+        if (interrupted) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    @Test
+    void aTickThatIgnoresInterruptsCannotHoldStopOrShutdownBeyondTheBound() throws Exception {
+        CountDownLatch insideTick = new CountDownLatch(1);
+        CountDownLatch releaseTick = new CountDownLatch(1);
+        AtomicInteger calls = new AtomicInteger();
+        FeedSimulator sim = new FeedSimulator(h.service, seq -> {
+            calls.incrementAndGet();
+            insideTick.countDown();
+            awaitIgnoringInterrupts(releaseTick);
+            return Optional.empty();
+        }, 6000, 6000, h.clock, h.events, Duration.ofMillis(300));
+        try {
+            assertTrue(sim.start(6000));
+            assertTrue(insideTick.await(10, TimeUnit.SECONDS));
+            long begin = System.nanoTime();
+            assertTrue(sim.stop(), "it was running");
+            long stopMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - begin);
+            assertTrue(stopMillis < 5_000, "stop() returned after its 300 ms bound, not after the tick: " + stopMillis + " ms");
+            assertFalse(sim.isRunning());
+            assertTrue(sim.isTickRunning(), "the tick is still blocked and is reported as such");
+
+            begin = System.nanoTime();
+            assertFalse(sim.shutdown(), "the thread is still inside the tick that ignored the interrupt");
+            long shutdownMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - begin);
+            assertTrue(shutdownMillis < 5_000, "shutdown() is bounded too: " + shutdownMillis + " ms");
+            assertTrue(threadAlive("feed-simulator"));
+
+            releaseTick.countDown();
+            assertTrue(PipelineHarness.awaitCondition(Duration.ofSeconds(10), () -> !threadAlive("feed-simulator")),
+                    "the thread ends as soon as the blocked call returns");
+            assertEquals(1, calls.get(), "no tick started after stop()");
+            assertFalse(sim.isTickRunning());
+        } finally {
+            releaseTick.countDown();
+            sim.shutdown();
+        }
+    }
+
+    @Test
+    void aTickBlockedInsideASubmissionIsInterruptedByShutdownAndTheThreadEnds() throws Exception {
+        CountDownLatch insideSubmit = new CountDownLatch(1);
+        CountDownLatch never = new CountDownLatch(1);
+        AtomicInteger interrupts = new AtomicInteger();
+        h.hook.set(stage -> {
+            if (stage == com.cloudkitchen.service.SubmissionHook.Stage.AFTER_TX1) {
+                insideSubmit.countDown();
+                try {
+                    never.await(30, TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    interrupts.incrementAndGet();
+                    Thread.currentThread().interrupt();
+                }
+            }
+        });
+        FeedSimulator sim = new FeedSimulator(h.service, FeedSimulator.randomGenerator(h.routing, menu, new Random(5)), 6000, 6000,
+                h.clock, h.events, Duration.ofSeconds(2));
+        try {
+            assertTrue(sim.start(6000));
+            assertTrue(insideSubmit.await(10, TimeUnit.SECONDS), "the tick is inside submitOrder, after its transaction committed");
+            assertTrue(sim.shutdown(), "stop() timed out, shutdownNow interrupted the submission and the thread ended in time");
+            assertEquals(1, interrupts.get(), "the blocked submission was interrupted exactly once");
+            assertFalse(threadAlive("feed-simulator"));
+            assertEquals(1, sim.produced(), "only the one submission that was already running");
+            assertEquals(1, h.t.number("SELECT COUNT(*) FROM orders"), "its order was committed by TX1 and is recoverable");
+        } finally {
+            never.countDown();
             sim.shutdown();
         }
     }
