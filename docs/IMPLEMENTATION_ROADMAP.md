@@ -327,25 +327,26 @@ Plus G-SECRET, G-TREE, G-TAG (`phase-6-complete`).
 **Depends on:** Phase 6 (and Phase 5 `AppContext`).
 
 ### Tasks
-- [ ] 7.1 `web.xml` (servlets, filter order, listener, session config, error pages, `jsp-config`), `AppBootstrapListener`, final `Launcher` (replaces spike behaviour; spike JSP removed or moved under `test`).
-- [ ] 7.2 `web.support`: `BaseServlet`, `CsrfTokens`, `Flash`, `RoutePolicy`.
-- [ ] 7.3 `web.filter`: `EncodingFilter`, `SecurityHeadersFilter`, `CsrfFilter`, `AuthFilter` (per-request `validateSession`, fail closed, session invalidation), `RoleFilter` (role from `ck.currentUser`).
-- [ ] 7.4 Controllers (MUST): `HomeServlet`, `ErrorServlet`, `LoginServlet`, `LogoutServlet`, `DashboardServlet`, `OrderListServlet`, `OrderDetailServlet`, `OrderCancelServlet`, `InventoryServlet`, `SimulatorServlet`.
-- [ ] 7.5 Controllers (SHOULD): `OrderCreateServlet`, `AdminMenuServlet`, `AdminStockServlet`, `WorkerPanelServlet` (pause/resume/**restart**, shows DEAD/generation), `ReportServlet`, `SnapshotServlet`, `UserAdminServlet` (enable/disable only; password reset stays COULD); `DashboardService` and `MenuService`/`StockService` admin methods. `CompensationServlet` (`/admin/compensations`, ADMIN-only retry, PRG) and the order-page banner without a Cancel button for PENDING orders.
-- [ ] 7.6 Views: JSPs, tag files, `app.css`; error pages; escaping everywhere; no scriptlets.
-- [ ] 7.7 `TestApp`, `HttpTestClient`.
-- [ ] 7.8 Tests: `LoginFlowWebTest`, `LockoutWebTest`, `SessionSecurityWebTest`, `CsrfWebTest`, `RoleAccessWebTest`, `OrderPrgWebTest`, `OrderDetailWebTest`, `DashboardWebTest`, `ErrorPagesWebTest`, `EncodingWebTest`, `SimulatorWebTest`, `AdminMenuStockWebTest`, `ReportWebTest`, `WorkerPanelWebTest`, `SecurityHeadersWebTest`, `XssEscapingWebTest`, `AccountDisableWebTest`, `CompensationOperatorWebTest`.
-- [ ] 7.9 Manual usability checklist (NFR-USA-01) executed and recorded.
+- [x] 7.1 `web.xml` (servlets, filter order, listener, session config, error pages, `jsp-config`), `AppBootstrapListener`, final `Launcher` (replaces spike behaviour; the spike JSP and filters are moved to test scope, D-076).
+- [x] 7.2 `web.support`: `BaseServlet`, `CsrfTokens`, `Flash`, `RoutePolicy`.
+- [x] 7.3 `web.filter`: `EncodingFilter`, `SecurityHeadersFilter`, `CsrfFilter`, `AuthFilter` (per-request `validateSession`, fail closed, session invalidation), `RoleFilter` (role from `ck.currentUser`).
+- [x] 7.4 (C1-C4 done: Home, Error, Login, Logout, Dashboard, OrderList, OrderDetail, Inventory, OrderCancel, Simulator, Compensation) Controllers (MUST): `HomeServlet`, `ErrorServlet`, `LoginServlet`, `LogoutServlet`, `DashboardServlet`, `OrderListServlet`, `OrderDetailServlet`, `OrderCancelServlet`, `InventoryServlet`, `SimulatorServlet`, `CompensationServlet` (`/admin/compensations`, ADMIN-only retry, PRG; MUST per FR-WEB-14 and D-075) with the order-page banner that has no Cancel button for a PENDING order.
+- [x] 7.5 (C5 done and verified, EV-059; restart of a DEAD worker fixed by D-095, EV-061: all seven servlets, `WorkerControl`, `SnapshotControl`, `streamDaily`, `listUsers`, `activeBrands`, `listRows`; ticked at the Phase 7 gate) Controllers (SHOULD): `OrderCreateServlet`, `AdminMenuServlet`, `AdminStockServlet`, `WorkerPanelServlet` (pause/resume/**restart**, shows DEAD/generation), `ReportServlet`, `SnapshotServlet`, `UserAdminServlet` (enable/disable only; password reset stays COULD); `DashboardService` and `MenuService`/`StockService` admin methods. (`CompensationServlet` and the pending-compensation banner are MUST and listed in 7.4, D-075.)
+- [x] 7.6 Views: JSPs, tag files, `app.css`; error pages; escaping everywhere; no scriptlets.
+- [x] 7.7 `TestApp`, `HttpTestClient`.
+- [x] 7.8 Tests: `LoginFlowWebTest`, `LockoutWebTest`, `SessionSecurityWebTest`, `CsrfWebTest`, `RoleAccessWebTest`, `OrderPrgWebTest`, `OrderDetailWebTest`, `DashboardWebTest`, `ErrorPagesWebTest`, `EncodingWebTest`, `SimulatorWebTest`, `AdminMenuStockWebTest`, `ReportWebTest`, `WorkerPanelWebTest`, plus the C5 additions `OrderEntryWebTest`, `UserAdminWebTest` and `ReportStreamingTest`, `SecurityHeadersWebTest`, `XssEscapingWebTest`, `AccountDisableWebTest`, `CompensationOperatorWebTest`.
+- [x] 7.9 Manual usability checklist (NFR-USA-01) executed and recorded (EV-060 E: what was and was not tested; 9 of 28 page views overflowed at 375 px and were fixed, D-094).
+- [x] **Tracked gap, closed in C4 (EV-056, EV-057, EV-058):** the Cancel form of the order page (C3) posts to `/orders/cancel` (route 10, MUST), which has no servlet until C4, so a signed-in user who presses it gets the container's 404. C4 builds `OrderCancelServlet` (POST, CSRF, PRG, flash, `OrderService.cancelOrderDetailed`, a PENDING order refused) and adds `OrderPrgWebTest` plus a cancel round trip in `OrderDetailWebTest`; the cancel behaviour of the order page is not complete before then.
 
 ### Exit criteria
-- [ ] `RoleAccessWebTest` covers every route in SDD §10.2 for all three actors.
-- [ ] CSRF test covers every POST route.
-- [ ] Error pages leak nothing.
-- [ ] A disabled user's open session is rejected on the next GET and POST (`AccountDisableWebTest`).
-- [ ] Dashboard shows worker generation/restarts and the count and age of orders awaiting compensation; the order page shows the "awaiting compensation" banner (`DashboardWebTest`, `OrderDetailWebTest`, `WorkerPanelWebTest`).
-- [ ] `./mvnw exec:java` serves the full UI; manual smoke (login, simulator start, dashboard refresh, cancel, logout) recorded.
-- [ ] WAR contains no embedded-server jars (`jar tf`).
-- [ ] Three consecutive full builds green.
+- [x] `RoleAccessWebTest` covers every route in SDD §10.2 for all three actors.
+- [x] CSRF test covers every POST route.
+- [x] Error pages leak nothing.
+- [x] A disabled user's open session is rejected on the next GET and POST (`AccountDisableWebTest`).
+- [x] Dashboard shows worker generation/restarts and the count and age of orders awaiting compensation; the order page shows the "awaiting compensation" banner (`DashboardWebTest`, `OrderDetailWebTest`, `WorkerPanelWebTest`).
+- [x] `./mvnw exec:java` serves the full UI; manual smoke (login, simulator start, dashboard refresh, cancel, logout) recorded (EV-060 E, with the ordered-shutdown log lines).
+- [x] WAR contains no embedded-server jars (`jar tf`).
+- [x] Three consecutive full builds green (EV-060 A: 2,362 tests each, 14:19, 14:37, 14:59 min; repeated on the final tree after the D-093 remediation, EV-061: 2,434 tests each, 14:25, 16:28, 15:43 min).
 
 ### Gate commands
 ```
@@ -355,6 +356,8 @@ Plus G-SECRET, G-TREE, G-TAG (`phase-6-complete`).
 ./mvnw exec:java              # manual smoke, then Ctrl+C; capture log tail showing ordered shutdown
 ```
 Plus G-SECRET, G-TREE, G-TAG (`phase-7-complete`).
+
+**Found in C6 and resolved (D-093, D-095, EV-060 F, EV-061):** an administrator could not restart a `DEAD` worker; `OrderOrchestrator.operatorRestart` now does, with regression tests. The phase gate (commit, tag, user approval) below is **not** done.
 
 **Requirements verified:** FR-WEB-14, FR-AUT-10, FR-AUT-11, FR-ORD-08, FR-LIF-04, FR-LIF-05 (UI), FR-INV-07 (UI), FR-INV-08, -09, FR-CON-10 (UI), FR-CON-11, FR-AUT-02, -03, -04, -06, -08, FR-WEB-01..10, -12, -13, NFR-USA-01.
 
@@ -366,23 +369,24 @@ Plus G-SECRET, G-TREE, G-TAG (`phase-7-complete`).
 **Depends on:** Phase 7.
 
 ### Tasks
-- [ ] 8.1 Traceability audit: every MUST row `Done (<hash>)` with evidence; every SHOULD `Done` or `Deferred (<reason>)`; any `Conflict` resolved with the user.
-- [ ] 8.2 Integration tests: `EndToEndLifecycleTest`, `CrashRecoveryTest`, `ThroughputSmokeTest`, `LauncherSmokeTest`.
-- [ ] 8.3 Manual real crash drill: run the app, start the simulator, `kill -9` the JVM, restart, verify no accepted order is lost (queries + orders.log + dashboard); record in EVIDENCE.md.
-- [ ] 8.4 Manual 5-minute load run at 60 orders/min; record metrics (NFR-PERF-01).
-- [ ] 8.5 Security checklist walk-through (SDD §12.9) with evidence; secret scan over full history (`git log -p | grep` patterns) recorded.
-- [ ] 8.6 Portability: run on the other available OS or mark unverified; MySQL 8 manual check or mark unverified; standalone Tomcat 10.1 WAR deployment check or mark unverified (NFR-PORT-01).
-- [ ] 8.7 Concept coverage review: JAVA_CONCEPT_MAPPING checklist ticked with evidence; viva notes complete.
-- [ ] 8.8 **COULD items** (only now, only if 8.1-8.7 are green): order search (FR-ORD-09), public tracking (FR-ORD-10), admin password reset incl. session invalidation (FR-AUT-09), dashboard charts (FR-WEB-11) with their tests (`OrderSearchWebTest`, `PublicTrackingWebTest`, `AdminPasswordResetWebTest`; charts covered in `DashboardWebTest`).
-- [ ] 8.9 Review 2 pack, created now as `docs/REVIEW2_PACK.md`: architecture one-pager, demo script (step-by-step with expected output), evidence index, requirement coverage summary, known limitations, viva Q&A pulled from the notes.
-- [ ] 8.10 `README.md` Quick start section appended (with user consent, A-08).
-- [ ] 8.11 Final tags: `phase-8-complete` and `review2-ready`.
+- [x] 8.1 Traceability audit: every MUST row `Done (<hash>)` with evidence; every SHOULD `Done` or `Deferred (<reason>)`; any `Conflict` resolved with the user. **Phase 8 (2026-10-12, uncommitted): audited in the Phase 8 verification matrix at the end of `docs/TRACEABILITY.md` (97 Verified, 13 Partially verified, 4 Unverified); no `Conflict` row; the 4 COULD rows are not built; MUST rows with an unverified environment are listed as Partially verified (EV-066, EV-067).**
+- [x] 8.2 Integration tests: `EndToEndLifecycleTest`, `CrashRecoveryTest`, `ThroughputSmokeTest`, `LauncherSmokeTest`. **Phase 8 (2026-10-12, uncommitted): `EndToEndLifecycleTest`, `LauncherSmokeTest`, `ThroughputSmokeTest` added (EV-064); `CrashRecoveryTest` exists since Phase 5; all pass in three consecutive builds (EV-063).**
+- [x] 8.3 Manual real crash drill: run the app, start the simulator, `kill -9` the JVM, restart, verify no accepted order is lost (queries + orders.log + dashboard); record in EVIDENCE.md. **Phase 8 (2026-10-12, uncommitted): executed with `kill -9`; 94 orders before and after, all reached a final state, ledger constant (EV-065). It also found P8-D2 (orphan database process).**
+- [x] 8.4 Manual 5-minute load run at 60 orders/min; record metrics (NFR-PERF-01). **Phase 8 (2026-10-12, uncommitted): executed; **NFR-PERF-01 is not met at the default configuration** (23 of 285 orders failed by queue-full compensation, stock exact; dashboard under 40 ms), recorded as P8-D3 (EV-065, EV-067).** **Remediation pass (EV-068): with the new default step times (D-096, accepted by the user on 2026-10-12) a second 5-minute run delivered 299 of 299 orders, 0 FAILED, so NFR-PERF-01 is met on that run.**
+- [x] 8.5 Security checklist walk-through (SDD §12.9) with evidence; secret scan over full history (`git log -p | grep` patterns) recorded. **Phase 8 (2026-10-12, uncommitted): walked through with 62 HTTP probes and the EV-060 C review; full-history secret scan clean (EV-063, EV-065).**
+- [x] 8.6 Portability: run on the other available OS or mark unverified; MySQL 8 manual check or mark unverified; standalone Tomcat 10.1 WAR deployment check or mark unverified (NFR-PORT-01). **Phase 8 (2026-10-12, uncommitted): no other OS, MySQL 8 or standalone Tomcat was available: all three are marked **unverified** with the reasons in EV-067.**
+- [ ] 8.7 Concept coverage review: JAVA_CONCEPT_MAPPING checklist ticked with evidence; viva notes complete. **Phase 8: not done as written; `docs/REVIEW_2_PREPARATION.md` section 3 lists the concepts that genuinely appear, but the full JAVA_CONCEPT_MAPPING checklist was not re-audited.**
+- [ ] 8.8 **COULD items** (only now, only if 8.1-8.7 are green): order search (FR-ORD-09), public tracking (FR-ORD-10), admin password reset incl. session invalidation (FR-AUT-09), dashboard charts (FR-WEB-11) with their tests (`OrderSearchWebTest`, `PublicTrackingWebTest`, `AdminPasswordResetWebTest`; charts covered in `DashboardWebTest`). **Phase 8: not done (COULD tier; conditional on a released, green baseline).**
+- [x] 8.9 Review 2 pack, created now as `docs/REVIEW2_PACK.md`: architecture one-pager, demo script (step-by-step with expected output), evidence index, requirement coverage summary, known limitations, viva Q&A pulled from the notes. **Phase 8 (2026-10-12, uncommitted): created as `docs/REVIEW_2_PREPARATION.md` (the name requested for Phase 8), not `docs/REVIEW2_PACK.md`; this naming difference is reported in EV-067.**
+- [x] 8.10 `README.md` Quick start section appended (with user consent, A-08). **Phase 8 (2026-10-12, uncommitted): README rewritten on the user's instruction for Phase 8 (commands verified on Linux; Windows form unverified).**
+- [ ] 8.11 Final tags: `phase-8-complete` and `review2-ready`. **Phase 8: not done; tags need the user's authorization.**
+- Decisions of 2026-10-12 (EV-070): D-096..D-100 accepted, DEV-2 retired (D-101). **Still open for Phase 8, stated plainly:** the exit criterion "three consecutive green builds on a fresh clone" can only be run after the work is committed; tags (`phase-7-complete`, `phase-8-complete`, `review2-ready`) are not created; task 8.7 (concept-coverage re-audit) and 8.8 (COULD features) are not done; MySQL 8, a standalone Tomcat, Windows, macOS and other browsers are unverified.
 
 ### Exit criteria
-- [ ] Three consecutive `./mvnw -q clean verify` green on a **fresh clone** (clone to a new folder, run the commands from the README only).
-- [ ] All concurrency tests 20/20 in the final run.
-- [ ] Every MUST requirement `Done`; unverified platforms/environments declared honestly.
-- [ ] Review 2 pack complete and consistent with EVIDENCE.md.
+- [ ] Three consecutive `./mvnw -q clean verify` green on a **fresh clone** (clone to a new folder, run the commands from the README only). **Not met as written:** met for the committed revision (EV-062, one build) and, for the uncommitted tree, three consecutive green builds on an isolated copy with equal source hash (EV-063); a fresh clone cannot contain uncommitted work. **EV-069: three consecutive green builds (2,471 tests) of the remediated and reviewed working tree on an isolated copy with equal source hash; still not a fresh clone because the work is uncommitted.**
+- [x] All concurrency tests 20/20 in the final run. **Met for the final tree (EV-063): 60 repeated methods x 20 in each of three builds, plus 12 non-repeated methods x 20.** **Re-confirmed on the remediated and reviewed tree (EV-069): 60 repeated methods x 20 in each of three builds, 12 further methods x 20.**
+- [ ] Every MUST requirement `Done`; unverified platforms/environments declared honestly. **Partly: see the Phase 8 matrix; environments are declared unverified; NFR-PERF-01 (SHOULD) not met.** **Update (EV-068): 100 of 114 rows Verified, 10 Partially verified (unverified environments), 4 Unverified (COULD, not built); the SHOULD requirement NFR-PERF-01 is now met.**
+- [x] Review 2 pack complete and consistent with EVIDENCE.md. **Created (`docs/REVIEW_2_PREPARATION.md`); consistent with EV-062..EV-067.**
 
 ### Gate commands
 ```

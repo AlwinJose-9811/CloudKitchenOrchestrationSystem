@@ -145,7 +145,7 @@ Rules: a concurrency test that fails once in 20 is investigated as a real race (
 * `RoutingCrashWindowTest` (Phase 5): with `CrashingSubmissionHook`, crash after TX1 commit, after `offer`, after the ROUTED commit, and during compensation; restart on the same DB; assert each order reaches DELIVERED (or its consistent compensated state), stock deducted exactly once (`assertStockLedger`), each edge once, a repeat submission with the same external reference returns DUPLICATE with the existing id.
 * `PendingCompensationRestartTest` (Phase 5): restart with PENDING orders (TX4 forced to fail before and after the restart) and with stale leases: leases cleared first, compensation attempted before any enqueue, still-pending orders never enqueued/leased/processed, snapshot files contain none of them, ordinary orders unaffected. `CompensationBackoffTest`: attempts, `compensation_next_at` backoff to the cap, `COMPENSATION_STUCK` threshold with `FakeClock`, operator retry resolves it (ignoring backoff, never the restore guard), staff cancel is refused.
 * `RecoveryServiceTest` also covers: terminal orders never loaded, oldest-first order, order of an inactive station -> FAILED(`STATION_UNAVAILABLE`) with restore only when VALIDATED/ROUTED.
-* `ShutdownCoordinatorTest` / `GracefulShutdownTest`: double trigger, ordering of steps recorded by a fake step list, timeout path with a stuck worker, final snapshot present on the listener path (best effort on the JVM-hook path, DEV-2).
+* `ShutdownCoordinatorTest` / `GracefulShutdownTest`: double trigger, ordering of steps recorded by a fake step list, timeout path with a stuck worker, final snapshot present on the listener path and, with the embedded database, on the JVM-hook path (`LauncherSmokeTest`; the former deviation DEV-2 was retired on 2026-10-12).
 * `CrashRecoveryTest` (Phase 8): stop executors abruptly (no drain, no snapshot), start a new `AppContext` on the same database, verify no accepted order lost or stuck. A real `kill -9` run is performed manually once and recorded in EVIDENCE.md.
 
 ## 8. Serialization tests (Phase 6)
@@ -357,7 +357,13 @@ Run through `HttpTestClient` against embedded Tomcat on a random port.
 | `LoginFlowWebTest` | `web` | 7 | Web | Login success/failure, session id changes at login, redirect, unauthenticated access redirected |
 | `OrderDetailWebTest` | `web` | 7 | Web | Order page lists status history in order; cancel button rules; PENDING-compensation banner without a Cancel button (ADMIN sees a link to the compensation page) |
 | `OrderPrgWebTest` | `web` | 7 | Web | POST new order returns 302 then GET shows flash once; refresh does not resubmit |
-| `ReportWebTest` | `web` | 7 | Web | CSV download headers and content; admin only |
+| `ReportWebTest` | `web` | 7 | Web | CSV download headers and content; admin only; strict date; chunked streaming of 2501 rows; failure before and after the first byte |
+| `OperatorRestartTest` | `pipeline` | 7 | Integration | Operator restart of a DEAD station (D-093): back to IDLE and the waiting order delivered, stale generation refused, automatic path still refuses, fresh budget, healthy restart, two operators 20x, a deterministic lock interleaving with the shutdown 20x, a pool with no free thread, an unknown or null station |
+| `WorkerPanelDeadWebTest` | `web` | 7 | Web | The panel shows a given-up station as DEAD and its Restart revives it; staff, forged token and stale generation refused; the revived station delivers new orders |
+| `JspFormRulesTest` | `web` | 7 | Static | Every POST form carries the CSRF input and posts to a POST route of the table; every GET form goes to a GET route without a token; every POST route is reached by a form (C6) |
+| `OrderEntryWebTest` | `web` | 7 | Web | In-house order entry: two-step form, success, every validation refusal with retained input, queue-full and not-accepting paths, CSRF and login (C5) |
+| `UserAdminWebTest` | `web` | 7 | Web | Account list without hashes, enable/disable, self-disable and unknown-user refusals, `reset` is 400, mutual-disable race 20x (C5) |
+| `ReportStreamingTest` | `service` | 7 | Integration | `streamDaily` at every page boundary, no connection held while writing, failure mid-stream, database paging equals the full query (C5) |
 | `RoleAccessWebTest` | `web` | 7 | Web | Route-by-role matrix: ADMIN vs KITCHEN_STAFF vs anonymous for every protected route (incl. /admin/users); role taken from the database on every request |
 | `SecurityHeadersWebTest` | `web` | 7 | Web | nosniff, frame deny, CSP present on all responses |
 | `SessionSecurityWebTest` | `web` | 7 | Web | HttpOnly, SameSite=Lax, Secure by config, 30-minute timeout config, logout invalidates |
@@ -367,9 +373,15 @@ Run through `HttpTestClient` against embedded Tomcat on a random port.
 | `AdminPasswordResetWebTest` | `web` | 8 | Web | COULD: admin resets staff password; old password rejected; the user's existing sessions are invalidated (session_version bump) |
 | `CrashRecoveryTest` | `integration` | 8 | Recovery | Abrupt stop (no drain, no final snapshot), restart on same DB, all non-terminal orders complete; sweeper active during the run |
 | `EndToEndLifecycleTest` | `integration` | 8 | Integration | Feed to DELIVERED across all three sources and stations with DB, files and metrics consistent |
-| `LauncherSmokeTest` | `integration` | 8 | Integration | Launcher boots embedded DB + Tomcat + pipeline, serves /login, shuts down cleanly via hook path |
+| `LauncherSmokeTest` | `integration` | 8 | Integration | Real launcher in a child JVM boots embedded DB + Tomcat + pipeline, serves /login, delivers an order, SIGTERM: eight shutdown steps, the final snapshot is written and signed, no WARN/ERROR line, no database process left (guards D-099 / retired DEV-2); keeps its log on failure |
 | `OrderSearchWebTest` | `web` | 8 | Web | COULD: search by ref/status/source |
 | `PublicTrackingWebTest` | `web` | 8 | Web | COULD: tracking page by code shows status only, no PII |
-| `ThroughputSmokeTest` | `integration` | 8 | Integration | Sustained simulated load completes; no FAILED from queue-full at default settings; bounded memory |
+| `ThroughputSmokeTest` | `integration` | 8 | Integration | Time-scaled (x10) NFR-PERF-01: the nominal 60 orders/minute at the default step times completes with no refusal and no queue-full FAILED, bounded memory; and a load above the capacity of slower kitchens (small queue) degrades by compensation, never by loss, with an exact stock ledger |
+| `OrderDetailConsistentReadTest` | `service` | 8 | Concurrency | P8-D4: readers of `OrderQueryService.detail` never see a status paired with a different history while a writer walks 45 orders to DELIVERED; 20 repetitions |
+| `EmbeddedDatabaseStartupTest` | `bootstrap` | 8 | Integration | P8-D5 / D-097: the embedded server is started with the prepared certificate and still offers TLS (asserts the cause, not a start time) |
+| `TlsMaterialTest` | `bootstrap` | 8 | Unit | D-097: certificate and key created once and reused, P-256, key 600 and directory 700, unreadable certificate replaced, mismatching key replaced with the certificate, near-expiry certificate renewed, impossible location gives empty without exception |
+| `DatabaseOwnershipTest` | `bootstrap` | 8 | Integration | P8-D2 / D-098: a real child JVM killed with SIGKILL leaves a server that the next start stops; a live application is never touched and a second start is refused (`DB_IN_USE`), also within one JVM; a server of a previous owner of exactly this directory is stopped, one without a previous owner or of a longer path is not (fake server processes) |
+| `AppFixtureCleanupTest` | `testsupport` | 8 | Unit | P8-D6 / D-100: the cleanup deletes only the scratch directories the fixture created and none of the look-alikes |
+| `DatabaseHolderMain` (helper, not a test) | `bootstrap` | 8 | Support | Child-JVM main that holds the embedded database for `DatabaseOwnershipTest` |
 
 Test-support classes (`TestDatabase`, `TestApp`, `HttpTestClient`, `TestData`, `FakeClock`, `TestSupport`) are listed in §3.
