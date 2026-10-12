@@ -9,6 +9,7 @@ import com.cloudkitchen.io.EventType;
 import com.cloudkitchen.io.OrderEventLog;
 import com.cloudkitchen.service.OrderService;
 import com.cloudkitchen.service.RoutingService;
+import com.cloudkitchen.service.WorkerControl;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -38,7 +39,7 @@ import org.slf4j.LoggerFactory;
  * the monitor's scheduler (thread {@code worker-monitor}) and shuts both down in {@link #shutdownGracefully}. Callers
  * of {@link #dispatch} are request or simulator threads and only touch the thread-safe queue.
  */
-public final class OrderOrchestrator implements OrderDispatcher {
+public final class OrderOrchestrator implements OrderDispatcher, WorkerControl {
 
     private static final Logger LOG = LoggerFactory.getLogger(OrderOrchestrator.class);
 
@@ -151,6 +152,12 @@ public final class OrderOrchestrator implements OrderDispatcher {
     // Operator controls and views
     // ------------------------------------------------------------------------------------------------------
 
+    @Override
+    public boolean hasStation(String code) {
+        return code != null && runtimes.containsKey(code);
+    }
+
+    @Override
     public void pause(String code) {
         StationRuntime runtime = runtimes.get(code);
         if (runtime != null) {
@@ -159,6 +166,7 @@ public final class OrderOrchestrator implements OrderDispatcher {
         }
     }
 
+    @Override
     public void resume(String code) {
         StationRuntime runtime = runtimes.get(code);
         if (runtime != null) {
@@ -167,6 +175,7 @@ public final class OrderOrchestrator implements OrderDispatcher {
         }
     }
 
+    @Override
     public List<StationView> stationViews() {
         long now = clock.millis();
         List<StationView> views = new ArrayList<>();
@@ -242,7 +251,10 @@ public final class OrderOrchestrator implements OrderDispatcher {
     /**
      * Replaces the worker of one station if {@code expectedGeneration} is still current (compare-and-set under the
      * runtime lock, so concurrent repairs restart once): retires the old generation, clears its leases, starts the next
-     * generation on the same queue and re-offers the orders it had leased.
+     * generation on the same queue and re-offers the orders it had leased. This is the <em>automatic</em> path of the
+     * monitor and the sweeper: it counts against the restart budget, gives up and marks the station {@code DEAD} when the
+     * budget is spent, and never touches a station that is already {@code DEAD} (SDD 7.11.7); only
+     * {@link #operatorRestart} brings such a station back.
      *
      * @return {@code true} if this call started a new generation
      */
@@ -266,29 +278,83 @@ public final class OrderOrchestrator implements OrderDispatcher {
                 LOG.error("Worker of station {} gave up after {} restarts", code, times.size());
                 return false;
             }
-            StationWorker old = runtime.worker();
-            old.retire();
-            Future<?> oldFuture = runtime.future();
-            if (oldFuture != null) {
-                oldFuture.cancel(true);
+            return replaceWorker(runtime, code, now);
+        }
+    }
+
+    /**
+     * The administrator's <em>Restart</em> (SDD 7.11.7, FR-CON-11): replaces the worker of the station if
+     * {@code expectedGeneration} is still the current one, <em>also when the station is {@code DEAD}</em>, and resets the
+     * restart budget, so a station that gave up is brought back without restarting the application. The generation is the
+     * one the page showed, so a stale click restarts nothing (D-079). It runs under the same runtime lock as the automatic
+     * path, so it can neither double-restart nor race a repair, and it refuses while the application is stopping.
+     *
+     * @return {@code true} if a new generation was started; {@code false} for a stale generation, an unknown station,
+     *         a stopping application or a worker thread that could not be started (the station is then {@code DEAD})
+     */
+    @Override
+    public boolean operatorRestart(String code, int expectedGeneration, String reason) {
+        StationRuntime runtime = code == null ? null : runtimes.get(code);
+        if (runtime == null || stopping || !started) {
+            return false;
+        }
+        synchronized (runtime.lock()) {
+            if (runtime.currentGeneration() != expectedGeneration) {
+                return false;
             }
-            List<Long> reclaimed = List.of();
-            try {
-                reclaimed = service.reclaimLeasesOf(old.owner());
-            } catch (CloudKitchenException e) {
-                LOG.warn("Could not clear the leases of {}; they expire by themselves ({})", old.owner(), e.getCode());
+            boolean wasDead = runtime.isDead();
+            if (!replaceWorker(runtime, code, clock.instant())) {
+                return false;
             }
-            runtime.activeIds().values().removeIf(g -> g == old.generation());
-            times.addLast(now);
-            runtime.countRestart();
-            launch(runtime, old.generation() + 1);
-            for (long id : reclaimed) {
-                runtime.offerNow(id);
+            runtime.restartTimes().clear(); // the operator's decision starts a fresh budget (and is not counted against it)
+            runtime.revive();
+            if (wasDead) {
+                LOG.warn("Station {} was DEAD and was restarted by an operator ({})", code, reason);
             }
-            events.log(EventType.WORKER_RESTARTED, 0L, "station=" + code + " generation=" + (old.generation() + 1)
-                    + " reclaimed=" + reclaimed.size());
             return true;
         }
+    }
+
+    /**
+     * Retires the current worker of the station, clears its leases, starts the next generation on the same queue and
+     * re-offers the orders it had leased. The caller holds {@link StationRuntime#lock()}. Refuses while the application is
+     * stopping: {@link #stop} takes the same lock before it drains, so a restart either finishes before the drain (and the
+     * new worker is drained with the rest) or sees {@code stopping} here, and never submits to a closed executor. If no
+     * thread can be started the station is marked {@code DEAD} and {@code false} is returned instead of an exception.
+     */
+    private boolean replaceWorker(StationRuntime runtime, String code, Instant now) {
+        if (stopping) {
+            return false;
+        }
+        StationWorker old = runtime.worker();
+        old.retire();
+        Future<?> oldFuture = runtime.future();
+        if (oldFuture != null) {
+            oldFuture.cancel(true);
+        }
+        List<Long> reclaimed = List.of();
+        try {
+            reclaimed = service.reclaimLeasesOf(old.owner());
+        } catch (CloudKitchenException e) {
+            LOG.warn("Could not clear the leases of {}; they expire by themselves ({})", old.owner(), e.getCode());
+        }
+        runtime.activeIds().values().removeIf(g -> g == old.generation());
+        runtime.restartTimes().addLast(now);
+        runtime.countRestart();
+        try {
+            launch(runtime, old.generation() + 1);
+        } catch (java.util.concurrent.RejectedExecutionException e) {
+            runtime.markDead();
+            events.log(EventType.WORKER_GAVE_UP, 0L, "station=" + code + " no worker thread could be started");
+            LOG.error("No thread could be started for the worker of station {}", code);
+            return false;
+        }
+        for (long id : reclaimed) {
+            runtime.offerNow(id);
+        }
+        events.log(EventType.WORKER_RESTARTED, 0L, "station=" + code + " generation=" + (old.generation() + 1)
+                + " reclaimed=" + reclaimed.size());
+        return true;
     }
 
     /**
@@ -384,7 +450,11 @@ public final class OrderOrchestrator implements OrderDispatcher {
         }
         for (StationRuntime runtime : runtimes.values()) {
             runtime.setPaused(false);
-            runtime.worker().requestDrain();
+            // the lock serialises with a restart: one that already holds it finishes first and its new worker is drained
+            // here; one that comes later sees "stopping" and refuses (see replaceWorker)
+            synchronized (runtime.lock()) {
+                runtime.worker().requestDrain();
+            }
         }
         pool.shutdown();
         try {

@@ -10,6 +10,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
+import java.util.function.Consumer;
 import org.apache.catalina.Context;
 import org.apache.catalina.LifecycleException;
 import org.apache.catalina.WebResourceRoot;
@@ -40,13 +41,23 @@ public final class Launcher {
         AppConfig config = AppConfig.load();
         RunningApp app = start(config, true, Path.of("data", "tomcat"));
         Runtime.getRuntime().addShutdownHook(new Thread(app::close, "ck-shutdown-hook"));
-        LOG.info("Cloud Kitchen is up: http://localhost:{}/demo/orders, /spike.jsp and /health (Ctrl+C stops it)", app.port());
+        LOG.info("Cloud Kitchen is up: http://localhost:{}/ (sign in) and /health (Ctrl+C stops it)", app.port());
         app.await();
     }
 
     /** Starts the optional database, then Tomcat. Everything already started is stopped if a later step fails. */
     public static RunningApp start(AppConfig config, boolean withDatabase, Path tomcatBaseDir)
             throws CloudKitchenException {
+        return start(config, withDatabase, tomcatBaseDir, null, null);
+    }
+
+    /**
+     * As {@link #start(AppConfig, boolean, Path)}, with two seams for tests: {@code webappDir} serves another web
+     * application directory than {@code src/main/webapp} (the Phase 1 spike lives in test scope), and
+     * {@code beforeStart} may register extra servlets on the context before Tomcat starts. Both may be {@code null}.
+     */
+    public static RunningApp start(AppConfig config, boolean withDatabase, Path tomcatBaseDir, Path webappDir,
+                                   Consumer<Context> beforeStart) throws CloudKitchenException {
         DbBootstrap database = null;
         try {
             String jdbcUrl = null;
@@ -54,7 +65,7 @@ public final class Launcher {
                 database = DbBootstrap.start(DbBootstrap.settingsFrom(config));
                 jdbcUrl = DataSourceFactory.embeddedUrl(database.host(), database.port(), database.database());
             }
-            return new RunningApp(startTomcat(config, tomcatBaseDir, jdbcUrl), database);
+            return new RunningApp(startTomcat(config, tomcatBaseDir, jdbcUrl, webappDir, beforeStart), database);
         } catch (CloudKitchenException | RuntimeException | Error e) {
             if (database != null) {
                 database.close();
@@ -63,8 +74,9 @@ public final class Launcher {
         }
     }
 
-    private static Tomcat startTomcat(AppConfig config, Path baseDir, String jdbcUrl) throws CloudKitchenException {
-        Path docBase = Path.of("src", "main", "webapp").toAbsolutePath();
+    private static Tomcat startTomcat(AppConfig config, Path baseDir, String jdbcUrl, Path webappDir, Consumer<Context> beforeStart)
+            throws CloudKitchenException {
+        Path docBase = (webappDir != null ? webappDir : Path.of("src", "main", "webapp")).toAbsolutePath();
         Path classes = Path.of("target", "classes").toAbsolutePath();
         if (!Files.isDirectory(docBase)) {
             throw new CloudKitchenException("WEBAPP_NOT_FOUND", "Web application directory not found: " + docBase
@@ -104,6 +116,9 @@ public final class Launcher {
             context.getServletContext().setAttribute(AppBootstrapListener.LAUNCHER_MARK_ATTRIBUTE,
                     "launcher-" + UUID.randomUUID());
 
+            if (beforeStart != null) {
+                beforeStart.accept(context);
+            }
             tomcat.start();
             if (!context.getState().isAvailable()) { // Tomcat only logs a failed context; the launcher must not report "up"
                 stopQuietly(tomcat);

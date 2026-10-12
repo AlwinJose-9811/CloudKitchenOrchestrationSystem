@@ -1,0 +1,40 @@
+/* One stylesheet, no inline styles: the Content-Security-Policy allows styles from this origin only. */
+:root { --fg: #1b1f23; --bg: #f6f7f9; --card: #ffffff; --line: #d0d5dd; --accent: #0b5cad; --ok: #146c2e; --warn: #8a5a00; --bad: #a3231b; }
+* { box-sizing: border-box; }
+body { margin: 0; font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--fg); background: var(--bg); }
+a { color: var(--accent); }
+.site-header { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem 1.25rem; padding: 0.75rem 1rem; background: var(--card); border-bottom: 1px solid var(--line); }
+.site-header .brand { font-weight: 700; text-decoration: none; color: var(--fg); }
+.site-header nav { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; }
+.site-header .logout { margin-left: auto; display: flex; align-items: center; gap: 0.5rem; }
+main { max-width: 72rem; margin: 0 auto; padding: 1rem; }
+.site-footer { max-width: 72rem; margin: 0 auto; padding: 0 1rem 1rem; color: #555; font-size: 0.875rem; }
+h1 { font-size: 1.5rem; margin-top: 0; }
+table { border-collapse: collapse; width: 100%; background: var(--card); }
+th, td { border: 1px solid var(--line); padding: 0.4rem 0.6rem; text-align: left; vertical-align: top; }
+label { display: block; margin: 0.5rem 0 0.2rem; font-weight: 600; }
+input, select, button { font: inherit; padding: 0.4rem 0.6rem; }
+button { cursor: pointer; }
+.flash { padding: 0.6rem 0.8rem; border-radius: 4px; border: 1px solid var(--line); background: var(--card); }
+.flash-success { border-color: var(--ok); color: var(--ok); }
+.flash-error { border-color: var(--bad); color: var(--bad); }
+.flash-info { border-color: var(--accent); color: var(--accent); }
+.badge { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 999px; border: 1px solid var(--line); font-size: 0.8rem; background: var(--card); }
+.badge-delivered { border-color: var(--ok); color: var(--ok); }
+.badge-failed, .badge-cancelled { border-color: var(--bad); color: var(--bad); }
+.badge-preparing, .badge-packed, .badge-out_for_delivery { border-color: var(--warn); color: var(--warn); }
+.error-page { max-width: 40rem; }
+.error-id code { font-size: 1rem; }
+@media (max-width: 480px) { .site-header .logout { margin-left: 0; } th, td { padding: 0.3rem 0.4rem; } }
+.note { color: #555; }
+.facts { width: auto; min-width: 20rem; }
+.facts th { width: 14rem; background: #eef0f3; }
+.filter { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem; margin: 0.75rem 0; }
+.filter label { margin: 0; }
+.low { color: var(--bad); }
+progress { width: 6rem; vertical-align: middle; }
+.pager a { margin-right: 1rem; }
+/* narrow screens: a wide table scrolls inside itself, the page does not (NFR-USA-01, 375 px) */
+@media (max-width: 640px) {
+  table { display: block; max-width: 100%; overflow-x: auto; }
+}

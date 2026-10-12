@@ -231,6 +231,22 @@ public final class JdbcOrderDao implements OrderDao {
     }
 
     @Override
+    public List<PendingCompensationRow> findPendingCompensationRows(Connection c) throws SQLException {
+        List<PendingCompensationRow> rows = new ArrayList<>();
+        try (PreparedStatement p = c.prepareStatement(
+                "SELECT o.id, s.code AS brand_code, o.compensation_reason, o.compensation_attempts, o.created_at, o.compensation_next_at"
+                        + " FROM orders o JOIN stations s ON s.id = o.station_id"
+                        + " WHERE o.compensation_state = 'PENDING' AND o.status = 'VALIDATED' ORDER BY o.id");
+             ResultSet rs = p.executeQuery()) {
+            while (rs.next()) {
+                rows.add(new PendingCompensationRow(rs.getLong("id"), rs.getString("brand_code"), rs.getString("compensation_reason"),
+                        rs.getInt("compensation_attempts"), Sql.getTime(rs, "created_at"), Sql.getTime(rs, "compensation_next_at")));
+            }
+        }
+        return rows;
+    }
+
+    @Override
     public boolean markCompensationPending(Connection c, long orderId, String reason, Instant nextAt) throws SQLException {
         try (PreparedStatement p = c.prepareStatement(
                 "UPDATE orders SET compensation_state = 'PENDING', compensation_reason = ?, compensation_attempts = 1,"
@@ -509,25 +525,44 @@ public final class JdbcOrderDao implements OrderDao {
         return index;
     }
 
+    private static final String REPORT_SELECT = "SELECT o.id, o.created_at, o.source, s.code AS brand_code, o.external_ref, o.status, o.total_amount, o.platform_fee,"
+            + " o.payment_mode, o.payment_status, (SELECT COALESCE(SUM(i.quantity), 0) FROM order_items i WHERE i.order_id = o.id) AS item_count"
+            + " FROM orders o JOIN stations s ON s.id = o.station_id WHERE o.created_at >= ? AND o.created_at < ?";
+
     @Override
     public List<ReportRow> findForReport(Connection c, Instant fromUtc, Instant toUtc) throws SQLException {
-        try (PreparedStatement p = c.prepareStatement(
-                "SELECT o.id, o.created_at, o.source, s.code AS brand_code, o.external_ref, o.status, o.total_amount, o.platform_fee,"
-                        + " o.payment_mode, o.payment_status, (SELECT COALESCE(SUM(i.quantity), 0) FROM order_items i WHERE i.order_id = o.id) AS item_count"
-                        + " FROM orders o JOIN stations s ON s.id = o.station_id WHERE o.created_at >= ? AND o.created_at < ? ORDER BY o.id")) {
+        try (PreparedStatement p = c.prepareStatement(REPORT_SELECT + " ORDER BY o.id")) {
             Sql.setTime(p, 1, fromUtc);
             Sql.setTime(p, 2, toUtc);
-            try (ResultSet rs = p.executeQuery()) {
-                List<ReportRow> rows = new ArrayList<>();
-                while (rs.next()) {
-                    BigDecimal total = rs.getBigDecimal("total_amount");
-                    rows.add(new ReportRow(rs.getLong("id"), Sql.getTime(rs, "created_at"), OrderSource.valueOf(rs.getString("source")),
-                            rs.getString("brand_code"), rs.getString("external_ref"), OrderStatus.valueOf(rs.getString("status")),
-                            rs.getInt("item_count"), total, rs.getBigDecimal("platform_fee"), total,
-                            PaymentMode.valueOf(rs.getString("payment_mode")), PaymentStatus.valueOf(rs.getString("payment_status"))));
-                }
-                return rows;
+            return reportRows(p);
+        }
+    }
+
+    @Override
+    public List<ReportRow> findForReportAfter(Connection c, Instant fromUtc, Instant toUtc, long afterId, int limit) throws SQLException {
+        if (limit < 1) {
+            throw new IllegalArgumentException("limit must be positive");
+        }
+        try (PreparedStatement p = c.prepareStatement(REPORT_SELECT + " AND o.id > ? ORDER BY o.id LIMIT ?")) {
+            Sql.setTime(p, 1, fromUtc);
+            Sql.setTime(p, 2, toUtc);
+            p.setLong(3, afterId);
+            p.setInt(4, limit);
+            return reportRows(p);
+        }
+    }
+
+    private static List<ReportRow> reportRows(PreparedStatement p) throws SQLException {
+        try (ResultSet rs = p.executeQuery()) {
+            List<ReportRow> rows = new ArrayList<>();
+            while (rs.next()) {
+                BigDecimal total = rs.getBigDecimal("total_amount");
+                rows.add(new ReportRow(rs.getLong("id"), Sql.getTime(rs, "created_at"), OrderSource.valueOf(rs.getString("source")),
+                        rs.getString("brand_code"), rs.getString("external_ref"), OrderStatus.valueOf(rs.getString("status")),
+                        rs.getInt("item_count"), total, rs.getBigDecimal("platform_fee"), total,
+                        PaymentMode.valueOf(rs.getString("payment_mode")), PaymentStatus.valueOf(rs.getString("payment_status"))));
             }
+            return rows;
         }
     }
 

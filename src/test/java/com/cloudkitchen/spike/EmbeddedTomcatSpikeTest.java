@@ -32,6 +32,9 @@ import org.junit.jupiter.api.TestInstance;
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class EmbeddedTomcatSpikeTest {
 
+    /** The Phase 1 spike web application lives in test scope (D-076); the production one is src/main/webapp. */
+    private static final Path SPIKE_WEBAPP = Path.of("src", "test", "spike-webapp");
+
     private Launcher.RunningApp app;
     private HttpTestClient http;
     private Path tomcatDir;
@@ -44,7 +47,7 @@ class EmbeddedTomcatSpikeTest {
         properties.setProperty("snapshot.hmac.secret", TestDatabase.randomHex(32));
         properties.setProperty("server.port", "0");
         tomcatDir = Path.of("data", "test", "tomcat-" + TestDatabase.randomHex(4));
-        app = Launcher.start(AppConfig.fromProperties(properties), false, tomcatDir);
+        app = Launcher.start(AppConfig.fromProperties(properties), false, tomcatDir, SPIKE_WEBAPP, null);
         port = app.port();
         http = new HttpTestClient(port);
     }
@@ -156,8 +159,8 @@ class EmbeddedTomcatSpikeTest {
             Class<?> configClass = isolated.loadClass("com.cloudkitchen.config.AppConfig");
             Object config = configClass.getMethod("fromProperties", Properties.class).invoke(null, properties);
             Class<?> launcherClass = isolated.loadClass("com.cloudkitchen.bootstrap.Launcher");
-            running = launcherClass.getMethod("start", configClass, boolean.class, Path.class)
-                    .invoke(null, config, false, isolatedDir);
+            running = launcherClass.getMethod("start", configClass, boolean.class, Path.class, Path.class, java.util.function.Consumer.class)
+                    .invoke(null, config, false, isolatedDir, SPIKE_WEBAPP, null);
             Method port = running.getClass().getMethod("port");
             HttpTestClient client = new HttpTestClient((Integer) port.invoke(running));
             assertEquals("OK", client.get("/health").body());

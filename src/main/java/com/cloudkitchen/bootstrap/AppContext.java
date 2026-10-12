@@ -24,11 +24,14 @@ import com.cloudkitchen.pipeline.PipelineSettings;
 import com.cloudkitchen.pipeline.RecoveryService;
 import com.cloudkitchen.pipeline.ShutdownCoordinator;
 import com.cloudkitchen.service.DashboardService;
+import com.cloudkitchen.service.AuthService;
+import com.cloudkitchen.service.LockoutPolicy;
 import com.cloudkitchen.service.MenuService;
 import com.cloudkitchen.service.OrderQueryService;
 import com.cloudkitchen.service.OrderService;
 import com.cloudkitchen.service.OrderValidator;
 import com.cloudkitchen.service.ReportService;
+import com.cloudkitchen.service.SnapshotControl;
 import com.cloudkitchen.service.PasswordHasher;
 import com.cloudkitchen.service.RoutingService;
 import com.cloudkitchen.service.StockService;
@@ -78,13 +81,14 @@ public final class AppContext implements AutoCloseable {
     private final SnapshotService snapshots;
     private final SnapshotTask snapshotTask;
     private final ReportService reports;
+    private final AuthService auth;
     private final CountDownLatch ready;
 
     private AppContext(HikariDataSource pool, Database database, OrderQueryService orderQueries, MetricsRegistry metrics,
                        OrderService orderService, OrderOrchestrator orchestrator, FeedSimulator simulator,
                        RecoveryService recovery, OrphanSweeper sweeper, DashboardService dashboard, MenuService menu,
                        StockService stock, ShutdownCoordinator shutdown, NioOrderEventLog eventLog, SnapshotService snapshots,
-                       SnapshotTask snapshotTask, ReportService reports, CountDownLatch ready) {
+                       SnapshotTask snapshotTask, ReportService reports, AuthService auth, CountDownLatch ready) {
         this.pool = pool;
         this.database = database;
         this.orderQueries = orderQueries;
@@ -102,6 +106,7 @@ public final class AppContext implements AutoCloseable {
         this.snapshots = snapshots;
         this.snapshotTask = snapshotTask;
         this.reports = reports;
+        this.auth = auth;
         this.ready = ready;
     }
 
@@ -130,7 +135,9 @@ public final class AppContext implements AutoCloseable {
             Database database = new Database(pool, clock, config.txRetryMax(), config.txRetryBackoffMs());
             var applied = new SchemaInitializer(database, clock).apply();
             LOG.info("Database schema is current (scripts applied by this start: {})", applied);
-            int created = new UserSeeder(database, new JdbcStaffUserDao(clock), new PasswordHasher(config.pbkdf2Iterations())).seedIfEmpty(config);
+            JdbcStaffUserDao staffUsers = new JdbcStaffUserDao(clock);
+            PasswordHasher hasher = new PasswordHasher(config.pbkdf2Iterations());
+            int created = new UserSeeder(database, staffUsers, hasher).seedIfEmpty(config);
             LOG.info("Initial accounts created by this start: {}", created);
 
             MetricsRegistry metrics = new MetricsRegistry();
@@ -161,6 +168,8 @@ public final class AppContext implements AutoCloseable {
                     new HmacSigner(config.snapshotHmacSecret()), config.snapshotMaxBytes(), config.snapshotRetainCount(), clock, events);
             SnapshotTask snapshotTask = new SnapshotTask(snapshots::writeAndPrune, config.snapshotIntervalSeconds(), clock);
             ReportService reports = new ReportService(database, orderDao, new CsvReportExporter(config.reportExportDir()));
+            AuthService auth = new AuthService(database, staffUsers, hasher,
+                    new LockoutPolicy(config.lockoutMaxAttempts(), config.lockoutDuration()), clock);
             RecoveryService recovery = new RecoveryService(orderService, orchestrator, events, snapshots::recoverMissingOrders);
             OrphanSweeper sweeper = new OrphanSweeper(orderService, orchestrator, recovery, OrphanSweeper.Settings.from(config), clock, events);
             DashboardService dashboard = new DashboardService(queries, stock, orderService, orchestrator::stationViews, metrics::view,
@@ -172,7 +181,7 @@ public final class AppContext implements AutoCloseable {
             }
             CountDownLatch ready = new CountDownLatch(1);
             AppContext app = new AppContext(pool, database, queries, metrics, orderService, orchestrator, simulator, recovery,
-                    sweeper, dashboard, menu, stock, coordinator, events, snapshots, snapshotTask, reports, ready);
+                    sweeper, dashboard, menu, stock, coordinator, events, snapshots, snapshotTask, reports, auth, ready);
             recovery.start(() -> {
                 if (coordinator.isStarted()) {
                     return; // the application is already shutting down: start nothing
@@ -350,12 +359,22 @@ public final class AppContext implements AutoCloseable {
         return snapshots;
     }
 
+    /** The on-demand snapshot as the web layer sees it: the file name of the snapshot just written. */
+    public SnapshotControl snapshotControl() {
+        return () -> snapshots.writeAndPrune().getFileName().toString();
+    }
+
     public SnapshotTask snapshotTask() {
         return snapshotTask;
     }
 
     public ReportService reports() {
         return reports;
+    }
+
+    /** Login, per-request session validation and account enable/disable (SDD 12). */
+    public AuthService auth() {
+        return auth;
     }
 
     public ShutdownCoordinator shutdownCoordinator() {

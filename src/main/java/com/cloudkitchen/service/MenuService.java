@@ -8,7 +8,9 @@ import com.cloudkitchen.db.SqlErrors;
 import com.cloudkitchen.domain.MenuItem;
 import com.cloudkitchen.domain.OrderItem;
 import com.cloudkitchen.domain.Station;
+import com.cloudkitchen.dto.BrandOption;
 import com.cloudkitchen.dto.FieldError;
+import com.cloudkitchen.dto.MenuItemRow;
 import com.cloudkitchen.exception.CloudKitchenException;
 import com.cloudkitchen.exception.PersistenceException;
 import com.cloudkitchen.exception.ValidationException;
@@ -43,6 +45,34 @@ public final class MenuService {
 
     public List<MenuItem> listAll() throws CloudKitchenException {
         return database.withConnection(c -> items.findAll(c));
+    }
+
+    /** The active brands in code order, for the order-entry form and the menu page. */
+    public List<BrandOption> activeBrands() throws CloudKitchenException {
+        return database.withConnection(c -> stations.findAllActive(c).stream()
+                .sorted(java.util.Comparator.comparing(Station::getCode))
+                .map(s -> new BrandOption(s.getCode(), s.getBrandName())).toList());
+    }
+
+    /** Every menu item, active or not, with its brand, ordered by brand code and name (the administrator's menu page). */
+    public List<MenuItemRow> listRows() throws CloudKitchenException {
+        return database.withConnection(c -> {
+            Map<Long, Station> byId = new java.util.HashMap<>();
+            List<MenuItemRow> rows = new ArrayList<>();
+            for (MenuItem item : items.findAll(c)) {
+                Station station = byId.get(item.getStationId());
+                if (station == null) {
+                    station = stations.findById(c, item.getStationId()).orElse(null);
+                    if (station != null) {
+                        byId.put(item.getStationId(), station);
+                    }
+                }
+                rows.add(new MenuItemRow(item.getId(), station == null ? "?" : station.getCode(), station == null ? "" : station.getBrandName(),
+                        item.getName(), item.getPrice(), item.isActive()));
+            }
+            rows.sort(java.util.Comparator.comparing(MenuItemRow::brandCode).thenComparing(MenuItemRow::name));
+            return rows;
+        });
     }
 
     /** The active items of one brand, or an empty list for an unknown brand code. */

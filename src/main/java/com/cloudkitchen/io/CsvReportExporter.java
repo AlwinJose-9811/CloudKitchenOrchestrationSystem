@@ -97,15 +97,27 @@ public final class CsvReportExporter {
 
     /** Writes the header and the rows to {@code out} (used for the file and for an HTTP download); does not close it. */
     public void write(Writer out, List<ReportRow> rows) throws IOException {
-        Objects.requireNonNull(out, "out");
         Objects.requireNonNull(rows, "rows");
+        writeHeader(out);
+        writeRows(out, rows);
+        out.flush();
+    }
+
+    /** Writes the header line only; with {@link #writeRows} it lets a caller stream a report of any length. */
+    public void writeHeader(Writer out) throws IOException {
+        Objects.requireNonNull(out, "out");
         out.write(HEADER);
         out.write(EOL);
+    }
+
+    /** Writes one line per row, without flushing; the bytes are the same as {@link #write} produces for those rows. */
+    public void writeRows(Writer out, List<ReportRow> rows) throws IOException {
+        Objects.requireNonNull(out, "out");
+        Objects.requireNonNull(rows, "rows");
         for (ReportRow row : rows) {
             out.write(line(row));
             out.write(EOL);
         }
-        out.flush();
     }
 
     private static String line(ReportRow r) {

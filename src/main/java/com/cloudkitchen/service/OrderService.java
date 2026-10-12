@@ -21,6 +21,7 @@ import com.cloudkitchen.dto.FencingToken;
 import com.cloudkitchen.dto.OrderItemRequest;
 import com.cloudkitchen.dto.OrderProgress;
 import com.cloudkitchen.dto.OrderRequest;
+import com.cloudkitchen.dto.PendingCompensationView;
 import com.cloudkitchen.dto.RecoverableOrder;
 import com.cloudkitchen.dto.SessionUser;
 import com.cloudkitchen.dto.SubmissionResult;
@@ -63,7 +64,7 @@ import org.slf4j.LoggerFactory;
  * a {@code StationWorker}, and the unfenced <em>non-owner</em> methods for staff, the submitter, the sweeper,
  * the operator and recovery.
  */
-public final class OrderService {
+public final class OrderService implements CompensationOperator {
 
     private static final Logger LOG = LoggerFactory.getLogger(OrderService.class);
     private static final String SYSTEM = "SYSTEM";
@@ -517,6 +518,20 @@ public final class OrderService {
             recordCompensationFailure(orderId, state.get().compensationAttempts());
             throw e;
         }
+    }
+
+    @Override
+    public List<PendingCompensationView> pendingCompensations() throws CloudKitchenException {
+        Instant now = clock.instant();
+        return database.withConnection(c -> orders.findPendingCompensationRows(c)).stream()
+                .map(r -> new PendingCompensationView(r.orderId(), r.brandCode(), r.reason(), r.attempts(),
+                        Math.max(0, Duration.between(r.createdAt(), now).toSeconds()), r.createdAt(), r.nextAttemptAt()))
+                .toList();
+    }
+
+    @Override
+    public Outcome retry(long orderId, SessionUser admin) throws CloudKitchenException {
+        return retryCompensation(orderId, admin) ? Outcome.RESOLVED : Outcome.ALREADY_RESOLVED;
     }
 
     private void recordCompensationFailure(long orderId, int attemptsSoFar) {

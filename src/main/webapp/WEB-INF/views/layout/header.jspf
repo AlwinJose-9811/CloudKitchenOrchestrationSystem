@@ -1,0 +1,42 @@
+<%@ taglib prefix="c" uri="jakarta.tags.core" %>
+<%@ taglib prefix="fn" uri="jakarta.tags.functions" %>
+<%@ taglib prefix="t" tagdir="/WEB-INF/tags" %>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title><c:out value="${pageTitle}" default="Cloud Kitchen"/> - Cloud Kitchen</title>
+  <link rel="stylesheet" href="<c:url value='/static/app.css'/>">
+  <c:if test="${not empty refreshSeconds}"><meta http-equiv="refresh" content="<c:out value='${refreshSeconds}'/>"></c:if>
+</head>
+<body>
+<header class="site-header">
+  <a class="brand" href="<c:url value='/'/>">Cloud Kitchen</a>
+  <c:if test="${not empty requestScope['ck.currentUser']}">
+    <nav aria-label="Main">
+      <a href="<c:url value='/dashboard'/>">Dashboard</a>
+      <a href="<c:url value='/orders'/>">Orders</a>
+      <a href="<c:url value='/inventory'/>">Inventory</a>
+      <a href="<c:url value='/orders/new'/>">New order</a>
+      <c:if test="${requestScope['ck.currentUser'].role == 'ADMIN'}">
+        <a href="<c:url value='/admin/simulator'/>">Simulator</a>
+        <a href="<c:url value='/admin/compensations'/>">Compensations</a>
+        <a href="<c:url value='/admin/menu'/>">Menu</a>
+        <a href="<c:url value='/admin/stock'/>">Stock</a>
+        <a href="<c:url value='/admin/workers'/>">Workers</a>
+        <a href="<c:url value='/admin/reports'/>">Reports</a>
+        <a href="<c:url value='/admin/users'/>">Users</a>
+      </c:if>
+    </nav>
+    <form class="logout" method="post" action="<c:url value='/logout'/>">
+      <t:csrf/>
+      <span class="who"><c:out value="${requestScope['ck.currentUser'].username}"/></span>
+      <button type="submit">Log out</button>
+    </form>
+  </c:if>
+</header>
+<main>
+<c:forEach var="flash" items="${flashes}">
+  <p class="flash flash-<c:out value='${flash.cssClass}'/>" role="status"><c:out value="${flash.text}"/></p>
+</c:forEach>

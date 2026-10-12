@@ -6,12 +6,14 @@ import com.cloudkitchen.db.Database;
 import com.cloudkitchen.domain.StaffUser;
 import com.cloudkitchen.domain.enums.Role;
 import com.cloudkitchen.dto.SessionUser;
+import com.cloudkitchen.dto.UserSummary;
 import com.cloudkitchen.exception.AuthenticationException;
 import com.cloudkitchen.exception.CloudKitchenException;
 import com.cloudkitchen.service.LockoutPolicy.LockoutState;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -110,6 +112,13 @@ public final class AuthService {
             return Optional.empty();
         }
         return Optional.of(new SessionUser(session.userId(), session.username(), state.get().role(), state.get().sessionVersion()));
+    }
+
+    /** Every account for the administrator page, ordered by user name; no hash, counter or session data leaves the service. */
+    public List<UserSummary> listUsers() throws CloudKitchenException {
+        return database.withConnection(c -> users.findAll(c).stream()
+                .sorted(java.util.Comparator.comparing(StaffUser::getUsername))
+                .map(u -> new UserSummary(u.getId(), u.getUsername(), u.getRole(), u.isEnabled(), u.getLockedUntil())).toList());
     }
 
     /**

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- Declared in XML, not annotations: filter order is only deterministic from the descriptor, and the same
-     descriptor serves the embedded launcher and the standalone WAR (SDD section 2). -->
+     descriptor serves the embedded launcher and the standalone WAR (SDD sections 2 and 10). -->
 <web-app xmlns="https://jakarta.ee/xml/ns/jakartaee"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="https://jakarta.ee/xml/ns/jakartaee https://jakarta.ee/xml/ns/jakartaee/web-app_6_0.xsd"
@@ -8,26 +8,62 @@
 
   <display-name>Cloud Kitchen Orchestration System</display-name>
 
+  <request-character-encoding>UTF-8</request-character-encoding>
+  <response-character-encoding>UTF-8</response-character-encoding>
+
   <listener>
     <listener-class>com.cloudkitchen.web.listener.AppBootstrapListener</listener-class>
   </listener>
 
-  <!-- Phase 1 probes: they only prove that the descriptor order is respected. Phase 7 replaces them. -->
+  <!-- Filter chain, SDD 10.3. The order of the filter-mapping elements is the order of execution:
+       Encoding, SecurityHeaders, Csrf, Auth, Role. -->
   <filter>
-    <filter-name>SpikeOrderFilterFirst</filter-name>
-    <filter-class>com.cloudkitchen.web.filter.SpikeOrderFilterFirst</filter-class>
+    <filter-name>EncodingFilter</filter-name>
+    <filter-class>com.cloudkitchen.web.filter.EncodingFilter</filter-class>
   </filter>
   <filter>
-    <filter-name>SpikeOrderFilterSecond</filter-name>
-    <filter-class>com.cloudkitchen.web.filter.SpikeOrderFilterSecond</filter-class>
+    <filter-name>SecurityHeadersFilter</filter-name>
+    <filter-class>com.cloudkitchen.web.filter.SecurityHeadersFilter</filter-class>
+  </filter>
+  <filter>
+    <filter-name>CsrfFilter</filter-name>
+    <filter-class>com.cloudkitchen.web.filter.CsrfFilter</filter-class>
+  </filter>
+  <filter>
+    <filter-name>AuthFilter</filter-name>
+    <filter-class>com.cloudkitchen.web.filter.AuthFilter</filter-class>
+  </filter>
+  <filter>
+    <filter-name>RoleFilter</filter-name>
+    <filter-class>com.cloudkitchen.web.filter.RoleFilter</filter-class>
   </filter>
   <filter-mapping>
-    <filter-name>SpikeOrderFilterFirst</filter-name>
+    <filter-name>EncodingFilter</filter-name>
     <url-pattern>/*</url-pattern>
+    <dispatcher>REQUEST</dispatcher>
+    <dispatcher>ERROR</dispatcher>
   </filter-mapping>
   <filter-mapping>
-    <filter-name>SpikeOrderFilterSecond</filter-name>
+    <filter-name>SecurityHeadersFilter</filter-name>
     <url-pattern>/*</url-pattern>
+    <dispatcher>REQUEST</dispatcher>
+    <dispatcher>ERROR</dispatcher>
+    <dispatcher>FORWARD</dispatcher>
+  </filter-mapping>
+  <filter-mapping>
+    <filter-name>CsrfFilter</filter-name>
+    <url-pattern>/*</url-pattern>
+    <dispatcher>REQUEST</dispatcher>
+  </filter-mapping>
+  <filter-mapping>
+    <filter-name>AuthFilter</filter-name>
+    <url-pattern>/*</url-pattern>
+    <dispatcher>REQUEST</dispatcher>
+  </filter-mapping>
+  <filter-mapping>
+    <filter-name>RoleFilter</filter-name>
+    <url-pattern>/*</url-pattern>
+    <dispatcher>REQUEST</dispatcher>
   </filter-mapping>
 
   <servlet>
@@ -39,14 +75,167 @@
     <url-pattern>/health</url-pattern>
   </servlet-mapping>
 
-  <!-- Phase 3 demonstration: read-only order list from the database. Replaced by the authenticated /orders in Phase 7. -->
   <servlet>
-    <servlet-name>OrdersDemoServlet</servlet-name>
-    <servlet-class>com.cloudkitchen.web.controller.OrdersDemoServlet</servlet-class>
+    <servlet-name>HomeServlet</servlet-name>
+    <servlet-class>com.cloudkitchen.web.controller.HomeServlet</servlet-class>
   </servlet>
   <servlet-mapping>
-    <servlet-name>OrdersDemoServlet</servlet-name>
-    <url-pattern>/demo/orders</url-pattern>
+    <servlet-name>HomeServlet</servlet-name>
+    <url-pattern></url-pattern>
+  </servlet-mapping>
+
+  <servlet>
+    <servlet-name>LoginServlet</servlet-name>
+    <servlet-class>com.cloudkitchen.web.controller.LoginServlet</servlet-class>
+  </servlet>
+  <servlet-mapping>
+    <servlet-name>LoginServlet</servlet-name>
+    <url-pattern>/login</url-pattern>
+  </servlet-mapping>
+
+  <servlet>
+    <servlet-name>LogoutServlet</servlet-name>
+    <servlet-class>com.cloudkitchen.web.controller.LogoutServlet</servlet-class>
+  </servlet>
+  <servlet-mapping>
+    <servlet-name>LogoutServlet</servlet-name>
+    <url-pattern>/logout</url-pattern>
+  </servlet-mapping>
+
+  <servlet>
+    <servlet-name>OrderCreateServlet</servlet-name>
+    <servlet-class>com.cloudkitchen.web.controller.OrderCreateServlet</servlet-class>
+  </servlet>
+  <servlet-mapping>
+    <servlet-name>OrderCreateServlet</servlet-name>
+    <url-pattern>/orders/new</url-pattern>
+  </servlet-mapping>
+
+  <servlet>
+    <servlet-name>AdminMenuServlet</servlet-name>
+    <servlet-class>com.cloudkitchen.web.controller.AdminMenuServlet</servlet-class>
+  </servlet>
+  <servlet-mapping>
+    <servlet-name>AdminMenuServlet</servlet-name>
+    <url-pattern>/admin/menu</url-pattern>
+  </servlet-mapping>
+
+  <servlet>
+    <servlet-name>AdminStockServlet</servlet-name>
+    <servlet-class>com.cloudkitchen.web.controller.AdminStockServlet</servlet-class>
+  </servlet>
+  <servlet-mapping>
+    <servlet-name>AdminStockServlet</servlet-name>
+    <url-pattern>/admin/stock</url-pattern>
+  </servlet-mapping>
+
+  <servlet>
+    <servlet-name>WorkerPanelServlet</servlet-name>
+    <servlet-class>com.cloudkitchen.web.controller.WorkerPanelServlet</servlet-class>
+  </servlet>
+  <servlet-mapping>
+    <servlet-name>WorkerPanelServlet</servlet-name>
+    <url-pattern>/admin/workers</url-pattern>
+  </servlet-mapping>
+
+  <servlet>
+    <servlet-name>SnapshotServlet</servlet-name>
+    <servlet-class>com.cloudkitchen.web.controller.SnapshotServlet</servlet-class>
+  </servlet>
+  <servlet-mapping>
+    <servlet-name>SnapshotServlet</servlet-name>
+    <url-pattern>/admin/snapshot</url-pattern>
+  </servlet-mapping>
+
+  <servlet>
+    <servlet-name>UserAdminServlet</servlet-name>
+    <servlet-class>com.cloudkitchen.web.controller.UserAdminServlet</servlet-class>
+  </servlet>
+  <servlet-mapping>
+    <servlet-name>UserAdminServlet</servlet-name>
+    <url-pattern>/admin/users</url-pattern>
+  </servlet-mapping>
+
+  <servlet>
+    <servlet-name>ReportServlet</servlet-name>
+    <servlet-class>com.cloudkitchen.web.controller.ReportServlet</servlet-class>
+  </servlet>
+  <servlet-mapping>
+    <servlet-name>ReportServlet</servlet-name>
+    <url-pattern>/admin/reports</url-pattern>
+    <url-pattern>/admin/reports/daily.csv</url-pattern>
+  </servlet-mapping>
+
+  <servlet>
+    <servlet-name>ErrorServlet</servlet-name>
+    <servlet-class>com.cloudkitchen.web.controller.ErrorServlet</servlet-class>
+  </servlet>
+  <servlet-mapping>
+    <servlet-name>ErrorServlet</servlet-name>
+    <url-pattern>/error</url-pattern>
+  </servlet-mapping>
+
+  <servlet>
+    <servlet-name>DashboardServlet</servlet-name>
+    <servlet-class>com.cloudkitchen.web.controller.DashboardServlet</servlet-class>
+  </servlet>
+  <servlet-mapping>
+    <servlet-name>DashboardServlet</servlet-name>
+    <url-pattern>/dashboard</url-pattern>
+  </servlet-mapping>
+
+  <servlet>
+    <servlet-name>OrderListServlet</servlet-name>
+    <servlet-class>com.cloudkitchen.web.controller.OrderListServlet</servlet-class>
+  </servlet>
+  <servlet-mapping>
+    <servlet-name>OrderListServlet</servlet-name>
+    <url-pattern>/orders</url-pattern>
+  </servlet-mapping>
+
+  <servlet>
+    <servlet-name>OrderDetailServlet</servlet-name>
+    <servlet-class>com.cloudkitchen.web.controller.OrderDetailServlet</servlet-class>
+  </servlet>
+  <servlet-mapping>
+    <servlet-name>OrderDetailServlet</servlet-name>
+    <url-pattern>/orders/view</url-pattern>
+  </servlet-mapping>
+
+  <servlet>
+    <servlet-name>OrderCancelServlet</servlet-name>
+    <servlet-class>com.cloudkitchen.web.controller.OrderCancelServlet</servlet-class>
+  </servlet>
+  <servlet-mapping>
+    <servlet-name>OrderCancelServlet</servlet-name>
+    <url-pattern>/orders/cancel</url-pattern>
+  </servlet-mapping>
+
+  <servlet>
+    <servlet-name>SimulatorServlet</servlet-name>
+    <servlet-class>com.cloudkitchen.web.controller.SimulatorServlet</servlet-class>
+  </servlet>
+  <servlet-mapping>
+    <servlet-name>SimulatorServlet</servlet-name>
+    <url-pattern>/admin/simulator</url-pattern>
+  </servlet-mapping>
+
+  <servlet>
+    <servlet-name>CompensationServlet</servlet-name>
+    <servlet-class>com.cloudkitchen.web.controller.CompensationServlet</servlet-class>
+  </servlet>
+  <servlet-mapping>
+    <servlet-name>CompensationServlet</servlet-name>
+    <url-pattern>/admin/compensations</url-pattern>
+  </servlet-mapping>
+
+  <servlet>
+    <servlet-name>InventoryServlet</servlet-name>
+    <servlet-class>com.cloudkitchen.web.controller.InventoryServlet</servlet-class>
+  </servlet>
+  <servlet-mapping>
+    <servlet-name>InventoryServlet</servlet-name>
+    <url-pattern>/inventory</url-pattern>
   </servlet-mapping>
 
   <session-config>
@@ -58,5 +247,45 @@
         <attribute-value>Lax</attribute-value>
       </attribute>
     </cookie-config>
+    <tracking-mode>COOKIE</tracking-mode>
   </session-config>
+
+  <!-- Every error reaches the generic ErrorServlet (D-077): the listed codes, any exception, and any other status. -->
+  <error-page>
+    <error-code>400</error-code>
+    <location>/error</location>
+  </error-page>
+  <error-page>
+    <error-code>403</error-code>
+    <location>/error</location>
+  </error-page>
+  <error-page>
+    <error-code>404</error-code>
+    <location>/error</location>
+  </error-page>
+  <error-page>
+    <error-code>405</error-code>
+    <location>/error</location>
+  </error-page>
+  <error-page>
+    <error-code>500</error-code>
+    <location>/error</location>
+  </error-page>
+  <error-page>
+    <exception-type>java.lang.Throwable</exception-type>
+    <location>/error</location>
+  </error-page>
+  <error-page>
+    <location>/error</location>
+  </error-page>
+
+  <jsp-config>
+    <jsp-property-group>
+      <url-pattern>*.jsp</url-pattern>
+      <url-pattern>*.jspf</url-pattern>
+      <url-pattern>*.tag</url-pattern>
+      <page-encoding>UTF-8</page-encoding>
+      <scripting-invalid>true</scripting-invalid>
+    </jsp-property-group>
+  </jsp-config>
 </web-app>

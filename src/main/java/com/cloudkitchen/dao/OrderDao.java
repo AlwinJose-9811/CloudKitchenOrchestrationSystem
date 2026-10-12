@@ -67,6 +67,13 @@ public interface OrderDao {
 
     List<Order> findAllPendingCompensations(Connection c) throws SQLException;
 
+    /** What the operator page shows about an order awaiting compensation. */
+    record PendingCompensationRow(long orderId, String brandCode, String reason, int attempts, Instant createdAt, Instant nextAttemptAt) {
+    }
+
+    /** The orders for which {@link #findAllPendingCompensations} would answer, as light rows, by order id. */
+    List<PendingCompensationRow> findPendingCompensationRows(Connection c) throws SQLException;
+
     /** TXC1: records that compensation is owed. */
     boolean markCompensationPending(Connection c, long orderId, String reason, Instant nextAt) throws SQLException;
 
@@ -112,6 +119,12 @@ public interface OrderDao {
     long count(Connection c, OrderFilter filter) throws SQLException;
 
     List<ReportRow> findForReport(Connection c, Instant fromUtc, Instant toUtc) throws SQLException;
+
+    /**
+     * The next page of the report: at most {@code limit} rows of the same day and order as {@link #findForReport} whose id is
+     * greater than {@code afterId} (use 0 for the first page). Paging by id keeps memory bounded for any number of orders.
+     */
+    List<ReportRow> findForReportAfter(Connection c, Instant fromUtc, Instant toUtc, long afterId, int limit) throws SQLException;
 
     /** Inserts an order read from a verified snapshot that is missing from the database. */
     long insertRecovered(Connection c, Order order) throws SQLException;

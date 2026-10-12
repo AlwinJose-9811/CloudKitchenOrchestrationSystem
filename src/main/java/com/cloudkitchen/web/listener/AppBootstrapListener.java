@@ -3,6 +3,7 @@ package com.cloudkitchen.web.listener;
 import com.cloudkitchen.bootstrap.AppContext;
 import com.cloudkitchen.config.AppConfig;
 import com.cloudkitchen.exception.CloudKitchenException;
+import com.cloudkitchen.web.support.AppServices;
 import jakarta.servlet.ServletContext;
 import jakarta.servlet.ServletContextEvent;
 import jakarta.servlet.ServletContextListener;
@@ -24,7 +25,6 @@ public class AppBootstrapListener implements ServletContextListener {
     public static final String LAUNCHER_MARK_ATTRIBUTE = "ck.launcher.mark";
     public static final String LISTENER_SEEN_ATTRIBUTE = "ck.listener.seen";
     public static final String APP_CONTEXT_ATTRIBUTE = "ck.app";
-    public static final String ORDER_QUERIES_ATTRIBUTE = "ck.orderQueryService";
 
     private static final Logger LOG = LoggerFactory.getLogger(AppBootstrapListener.class);
 
@@ -40,15 +40,18 @@ public class AppBootstrapListener implements ServletContextListener {
             return;
         }
         AppConfig appConfig = (AppConfig) config;
+        context.getSessionCookieConfig().setSecure(appConfig.sessionCookieSecure()); // HttpOnly and SameSite=Lax come from web.xml
         String jdbcUrl = context.getAttribute(JDBC_URL_ATTRIBUTE) instanceof String url ? url : appConfig.dbUrl().orElse(null);
         if (jdbcUrl == null) {
             LOG.info("No database is configured for this context; persistence services are not started");
             return;
         }
         try {
-            AppContext app = AppContext.create(appConfig, jdbcUrl, Clock.systemUTC());
+            Clock clock = Clock.systemUTC();
+            AppContext app = AppContext.create(appConfig, jdbcUrl, clock);
             context.setAttribute(APP_CONTEXT_ATTRIBUTE, app);
-            context.setAttribute(ORDER_QUERIES_ATTRIBUTE, app.orderQueries());
+            context.setAttribute(AppServices.ATTRIBUTE, new AppServices(appConfig, clock, app.auth(), app.orders(), app.orderQueries(),
+                    app.dashboard(), app.menu(), app.stock(), app.reports(), app.simulator(), app.orders(), app.orchestrator(), app.snapshotControl()));
         } catch (CloudKitchenException e) {
             LOG.error("Database initialisation failed ({}): {}", e.getCode(), e.getMessage());
             throw new IllegalStateException("Database initialisation failed (" + e.getCode() + "); the application was not started", e);
@@ -61,7 +64,7 @@ public class AppBootstrapListener implements ServletContextListener {
         if (context.getAttribute(APP_CONTEXT_ATTRIBUTE) instanceof AppContext app) {
             app.close();
             context.removeAttribute(APP_CONTEXT_ATTRIBUTE);
-            context.removeAttribute(ORDER_QUERIES_ATTRIBUTE);
+            context.removeAttribute(AppServices.ATTRIBUTE);
         }
         LOG.info("Context destroyed");
     }

@@ -43,10 +43,14 @@ import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
 
 /**
- * The Phase 3 end-to-end path with nothing faked: real embedded Tomcat, real embedded MariaDB, schema and accounts
- * created by the start-up sequence, orders created through the real OrderService, read back by the servlet and JSP.
+ * The Phase 3 end-to-end path with nothing faked, migrated to the production route (D-085): real embedded Tomcat, real
+ * embedded MariaDB, schema and accounts created by the start-up sequence, orders created through the real OrderService,
+ * read back by {@code OrderListServlet} and its JSP behind the real login. Every assertion of the former
+ * {@code OrdersDemoWebTest} on {@code /demo/orders} is kept here on {@code /orders}; what changed is only that the caller
+ * signs in first, that a POST needs a CSRF token to reach the servlet's 405, and that an unknown sub-path is the 404 of a
+ * signed-in administrator.
  */
-class OrdersDemoWebTest {
+class OrderListWebTest {
 
     private static AppConfig config(Path root, String dbPassword, String hmac) {
         Properties p = new Properties();
@@ -101,6 +105,16 @@ class OrdersDemoWebTest {
         return id;
     }
 
+    /** Signs in through the real form with the bootstrap administrator of this configuration. */
+    private static HttpTestClient signIn(int port, AppConfig config) {
+        HttpTestClient browser = HttpTestClient.withCookies(port);
+        String token = HttpTestClient.extractCsrf(browser.get("/login").body());
+        Reply reply = browser.postForm("/login", java.util.Map.of("username", config.bootstrapAdminUsername().orElseThrow(),
+                "password", config.bootstrapAdminPassword().orElseThrow(), "_csrf", token));
+        HttpTestClient.assertRedirect(reply, "/dashboard");
+        return browser;
+    }
+
     private static int rows(String html) {
         Matcher m = Pattern.compile("<tr>\\s*<td>").matcher(html);
         int count = 0;
@@ -122,9 +136,10 @@ class OrdersDemoWebTest {
             // ---- first start: schema, reference data and accounts are created by the start-up sequence ----
             try (Launcher.RunningApp app = Launcher.start(config, true, root.resolve("tomcat"))) {
                 dbPort = app.databasePort();
-                HttpTestClient http = new HttpTestClient(app.port());
+                HttpTestClient http = signIn(app.port(), config);
+                HttpTestClient.assertRedirect(new HttpTestClient(app.port()).get("/orders"), "/login");
 
-                Reply empty = http.get("/demo/orders");
+                Reply empty = http.get("/orders");
                 assertEquals(200, empty.status());
                 assertTrue(empty.headers().firstValue("Content-Type").orElse("").contains("text/html"));
                 assertTrue(empty.body().contains("Showing 0 of 0 orders"), empty.body());
@@ -145,7 +160,7 @@ class OrdersDemoWebTest {
                         PaymentMode.CASH, List.of(new OrderItemRequest(margherita, 1))));
                 assertEquals(List.of(true, true, true), List.of(a.orderId() != null, b.orderId() != null, c.orderId() != null));
 
-                Reply all = http.get("/demo/orders");
+                Reply all = http.get("/orders");
                 assertEquals(200, all.status());
                 assertTrue(all.body().contains("Showing 3 of 3 orders"), all.body());
                 assertEquals(3, rows(all.body()));
@@ -157,24 +172,24 @@ class OrdersDemoWebTest {
                 }
                 assertTrue(all.body().indexOf("WEB-3") < all.body().indexOf("WEB-1"), "newest first");
 
-                assertEquals(1, rows(http.get("/demo/orders?source=ZOMATO").body()));
-                assertEquals(3, rows(http.get("/demo/orders?status=ROUTED").body()));
-                assertTrue(http.get("/demo/orders?status=FAILED").body().contains("No orders."));
-                assertEquals(0, rows(http.get("/demo/orders?status=FAILED").body()));
+                assertEquals(1, rows(http.get("/orders?source=ZOMATO").body()));
+                assertEquals(3, rows(http.get("/orders?status=ROUTED").body()));
+                assertTrue(http.get("/orders?status=FAILED").body().contains("No orders."));
+                assertEquals(0, rows(http.get("/orders?status=FAILED").body()));
 
                 // the page reflects the database, not a copy: change a row behind the application's back
                 try (Connection raw = pool[0].getConnection(); PreparedStatement p = raw.prepareStatement("UPDATE orders SET status = 'CANCELLED' WHERE external_ref = 'WEB-2'")) {
                     p.executeUpdate();
                 }
-                assertEquals(1, rows(http.get("/demo/orders?status=CANCELLED").body()));
-                assertEquals(2, rows(http.get("/demo/orders?status=ROUTED").body()));
+                assertEquals(1, rows(http.get("/orders?status=CANCELLED").body()));
+                assertEquals(2, rows(http.get("/orders?status=ROUTED").body()));
 
                 // output encoding: a hostile value in the data is escaped, never interpreted
                 try (Connection raw = pool[0].getConnection(); PreparedStatement p = raw.prepareStatement("UPDATE stations SET code = ? WHERE code = 'PIZZA'")) {
                     p.setString(1, "X<b>&\"");
                     p.executeUpdate();
                 }
-                String escaped = http.get("/demo/orders").body();
+                String escaped = http.get("/orders").body();
                 assertFalse(escaped.contains("<b>"), "raw markup from the database must not reach the page");
                 assertTrue(escaped.contains("X&lt;b&gt;&amp;"), escaped);
                 try (Connection raw = pool[0].getConnection(); PreparedStatement p = raw.prepareStatement("UPDATE stations SET code = 'PIZZA' WHERE code = ?")) {
@@ -183,14 +198,14 @@ class OrdersDemoWebTest {
                 }
 
                 // bad input and other methods
-                assertEquals(400, http.get("/demo/orders?page=abc").status());
-                assertEquals(400, http.get("/demo/orders?page=0").status());
-                assertEquals(400, http.get("/demo/orders?page=99999999999").status());
-                assertEquals(400, http.get("/demo/orders?status=NOPE").status());
-                assertEquals(400, http.get("/demo/orders?source=ebay").status());
-                assertEquals(405, http.post("/demo/orders", "x=1").status());
-                assertEquals(404, http.get("/demo/orders/extra").status());
-                String error = http.get("/demo/orders?page=abc").body();
+                assertEquals(400, http.get("/orders?page=abc").status());
+                assertEquals(400, http.get("/orders?page=0").status());
+                assertEquals(400, http.get("/orders?page=99999999999").status());
+                assertEquals(400, http.get("/orders?status=NOPE").status());
+                assertEquals(400, http.get("/orders?source=ebay").status());
+                assertEquals(405, http.post("/orders", "x=1&_csrf=" + HttpTestClient.extractCsrf(http.get("/orders").body())).status());
+                assertEquals(404, http.get("/orders/extra").status());
+                String error = http.get("/orders?page=abc").body();
                 assertFalse(error.contains("Exception") || error.contains("at com.cloudkitchen"), "no stack trace in an error page");
 
                 // paging
@@ -198,8 +213,8 @@ class OrdersDemoWebTest {
                     service.submitOrder(new OrderRequest(OrderSource.SWIGGY, "WEB-" + i, "BIRYANI", "Dev Patel", new BigDecimal("1.00"),
                             PaymentMode.PREPAID_AGGREGATOR, List.of(new OrderItemRequest(chicken, 1))));
                 }
-                Reply page1 = http.get("/demo/orders");
-                Reply page2 = http.get("/demo/orders?page=2");
+                Reply page1 = http.get("/orders");
+                Reply page2 = http.get("/orders?page=2");
                 assertTrue(page1.body().contains("Showing 20 of 22 orders, page 1 of 2"), page1.body());
                 assertEquals(20, rows(page1.body()));
                 assertTrue(page1.body().contains("id=\"next\""));
@@ -207,7 +222,7 @@ class OrdersDemoWebTest {
                 assertEquals(2, rows(page2.body()));
                 assertTrue(page2.body().contains("id=\"prev\""));
                 assertFalse(page2.body().contains("id=\"next\""));
-                assertEquals(0, rows(http.get("/demo/orders?page=3").body()));
+                assertEquals(0, rows(http.get("/orders?page=3").body()));
 
                 // the account bootstrap ran exactly once during this start
                 try (Connection raw = pool[0].getConnection(); PreparedStatement p = raw.prepareStatement("SELECT COUNT(*) FROM staff_users"); ResultSet rs = p.executeQuery()) {
@@ -221,8 +236,8 @@ class OrdersDemoWebTest {
 
             // ---- second start on the same data directory: nothing is re-seeded, the orders are still there ----
             try (Launcher.RunningApp app = Launcher.start(config, true, root.resolve("tomcat"))) {
-                HttpTestClient http = new HttpTestClient(app.port());
-                Reply again = http.get("/demo/orders");
+                HttpTestClient http = signIn(app.port(), config);
+                Reply again = http.get("/orders");
                 assertEquals(200, again.status());
                 assertTrue(again.body().contains("Showing 20 of 22 orders, page 1 of 2"), "orders persisted across the restart");
                 try (HikariDataSource check = DataSourceFactory.create(config, DataSourceFactory.embeddedUrl("127.0.0.1", app.databasePort(), "ckdb"));

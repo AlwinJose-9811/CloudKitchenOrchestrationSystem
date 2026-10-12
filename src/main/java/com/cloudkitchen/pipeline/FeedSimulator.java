@@ -13,6 +13,7 @@ import com.cloudkitchen.io.OrderEventLog;
 import com.cloudkitchen.service.MenuService;
 import com.cloudkitchen.service.OrderService;
 import com.cloudkitchen.service.RoutingService;
+import com.cloudkitchen.service.SimulatorControl;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Duration;
@@ -53,7 +54,7 @@ import org.slf4j.LoggerFactory;
  * unless it already passed that check, in which case its transaction either commits (the order is recovered by the
  * next start) or fails because the pool is closed (no order is created). The thread ends as soon as the call returns.
  */
-public final class FeedSimulator {
+public final class FeedSimulator implements SimulatorControl {
 
     private static final Logger LOG = LoggerFactory.getLogger(FeedSimulator.class);
     private static final Duration DEFAULT_STOP_WAIT = Duration.ofSeconds(2);
@@ -148,6 +149,7 @@ public final class FeedSimulator {
     }
 
     /** Starts producing at {@code rate} orders per minute; {@code false} if it is already running. */
+    @Override
     public synchronized boolean start(int rate) {
         checkRate(rate);
         if (running) {
@@ -169,6 +171,7 @@ public final class FeedSimulator {
      * Stops producing and waits, for at most the stop bound, for a tick that is already running; {@code false} if it was
      * not running. Returns after the bound even if the tick is still blocked (see the class comment).
      */
+    @Override
     public boolean stop() {
         ScheduledFuture<?> cancelled;
         synchronized (this) {
@@ -188,6 +191,7 @@ public final class FeedSimulator {
     }
 
     /** Changes the rate; takes effect at once if the simulator is running (the schedule is replaced). */
+    @Override
     public synchronized void setRate(int rate) {
         checkRate(rate);
         ratePerMinute = rate;
@@ -236,6 +240,11 @@ public final class FeedSimulator {
 
     public Stats stats() {
         return new Stats(produced.get(), accepted.get(), notAccepted.get(), errors.get(), lastTickAt);
+    }
+
+    @Override
+    public Status status() {
+        return new Status(running, ratePerMinute, maxRatePerMinute, produced.get(), accepted.get(), notAccepted.get(), errors.get());
     }
 
     /** One scheduled production step; runs on the simulator thread, one at a time, and never throws. */

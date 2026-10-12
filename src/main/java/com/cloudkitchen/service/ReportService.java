@@ -9,6 +9,7 @@ import com.cloudkitchen.util.TimeUtil;
 import java.io.IOException;
 import java.io.Writer;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Objects;
@@ -40,6 +41,32 @@ public final class ReportService {
     /** Writes {@code orders-<day>.csv} into the configured report directory and returns the file. */
     public Path exportDaily(LocalDate utcDay) throws CloudKitchenException {
         return exporter.export(utcDay, rowsOf(utcDay));
+    }
+
+    /** Rows read from the database per query while a download is streamed. */
+    public static final int STREAM_PAGE_SIZE = 500;
+
+    /**
+     * Streams the report of the day to {@code out} (HTTP download, D-078): the header, then the rows page by page in order id
+     * order, each page read with its own pooled connection, so memory stays bounded and a slow client never holds a
+     * connection. There is no row cap. The caller owns and closes the writer; it is flushed once at the end.
+     */
+    public void streamDaily(LocalDate utcDay, Writer out) throws CloudKitchenException, IOException {
+        Objects.requireNonNull(utcDay, "utcDay");
+        Instant from = TimeUtil.startOfUtcDay(utcDay);
+        Instant to = TimeUtil.endOfUtcDayExclusive(utcDay);
+        exporter.writeHeader(out);
+        long after = 0;
+        while (true) {
+            long cursor = after;
+            List<ReportRow> page = database.withConnection(c -> orders.findForReportAfter(c, from, to, cursor, STREAM_PAGE_SIZE));
+            exporter.writeRows(out, page);
+            if (page.size() < STREAM_PAGE_SIZE) {
+                break;
+            }
+            after = page.get(page.size() - 1).orderId();
+        }
+        out.flush();
     }
 
     /** Writes the report of the day to {@code out} (HTTP download); the caller owns and closes the writer. */
