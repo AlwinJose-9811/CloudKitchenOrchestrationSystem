@@ -247,15 +247,15 @@ public final class AppConfig {
     }
 
     public int workerPrepMs() {
-        return intValue("worker.prep.ms", 3000, 0, 600_000);
+        return intValue("worker.prep.ms", 1000, 0, 600_000);
     }
 
     public int workerPackMs() {
-        return intValue("worker.pack.ms", 1000, 0, 600_000);
+        return intValue("worker.pack.ms", 300, 0, 600_000);
     }
 
     public int workerDeliveryMs() {
-        return intValue("worker.delivery.ms", 4000, 0, 600_000);
+        return intValue("worker.delivery.ms", 700, 0, 600_000);
     }
 
     /** Consecutive transient failures before a worker parks an order (RR-8). */

@@ -37,13 +37,18 @@ public final class OrderQueryService {
         });
     }
 
-    /** The order with its lines and status history. */
+    /**
+     * The order with its lines and status history. The order row, the lines and the history are three statements; they run in
+     * one transaction so that they see one snapshot (InnoDB repeatable read). Separate statements could pair a status with a
+     * history that a worker had already extended, which {@code Order} refuses (found in the Phase 8 audit, P8-D4).
+     */
     public Optional<Order> detail(long id) throws CloudKitchenException {
-        return database.withConnection(c -> orders.findById(c, id));
+        return database.inTransaction(c -> orders.findById(c, id));
     }
 
+    /** Same snapshot rule as {@link #detail}. */
     public Optional<Order> byTrackingCode(String code) throws CloudKitchenException {
-        return database.withConnection(c -> orders.findByTrackingCode(c, code));
+        return database.inTransaction(c -> orders.findByTrackingCode(c, code));
     }
 
     public Map<OrderStatus, Long> countByStatus() throws CloudKitchenException {

@@ -129,9 +129,9 @@ class AppConfigTest {
         assertEquals(25, c.txRetryBackoffMs());
         assertEquals(50, c.stationQueueCapacity());
         assertEquals(500, c.queueOfferTimeoutMs());
-        assertEquals(3000, c.workerPrepMs());
-        assertEquals(1000, c.workerPackMs());
-        assertEquals(4000, c.workerDeliveryMs());
+        assertEquals(1000, c.workerPrepMs());
+        assertEquals(300, c.workerPackMs());
+        assertEquals(700, c.workerDeliveryMs());
         assertEquals(8, c.workerRetryMax());
         assertEquals(200, c.workerRetryBackoffMs());
         assertEquals(30, c.workerLeaseTtlSeconds());

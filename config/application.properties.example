@@ -28,9 +28,9 @@ tx.retry.backoff.ms=25
 # --- Pipeline ---
 station.queue.capacity=50
 queue.offer.timeout.ms=500
-worker.prep.ms=3000
-worker.pack.ms=1000
-worker.delivery.ms=4000
+worker.prep.ms=1000
+worker.pack.ms=300
+worker.delivery.ms=700
 worker.retry.max=8
 worker.retry.backoff.ms=200
 worker.lease.ttl.seconds=30

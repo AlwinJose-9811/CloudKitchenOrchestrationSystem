@@ -11,6 +11,7 @@ import java.net.ServerSocket;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.time.Duration;
 import java.util.Objects;
 import java.util.regex.Pattern;
 import org.slf4j.Logger;
@@ -62,10 +63,12 @@ public final class DbBootstrap implements AutoCloseable {
     }
 
     private final Settings settings;
+    private final DatabaseOwnership ownership;
     private DB db;
 
     private DbBootstrap(Settings settings) {
         this.settings = settings;
+        this.ownership = new DatabaseOwnership(settings.dataDir(), Duration.ofSeconds(30));
     }
 
     /** Settings derived from the configuration; the temp and socket directories sit next to the data directory. */
@@ -89,6 +92,7 @@ public final class DbBootstrap implements AutoCloseable {
         DbBootstrap bootstrap = new DbBootstrap(settings);
         try {
             bootstrap.prepareDirectories();
+            bootstrap.ownership.acquire();
             if (!Files.exists(settings.dataDir().resolve(HARDENED_MARKER))) {
                 bootstrap.bootstrapAccounts();
             }
@@ -119,10 +123,12 @@ public final class DbBootstrap implements AutoCloseable {
         DB running = db;
         db = null;
         if (running == null) {
+            ownership.release(); // a start that failed after the lock was taken: give it up (no server runs)
             return;
         }
         try {
             running.stop();
+            ownership.release(); // only after the server is stopped; a failed stop keeps the pid for the next start
             LOG.info("Embedded database stopped");
         } catch (ManagedProcessException | RuntimeException e) {
             LOG.error("Embedded database did not stop cleanly: {}", e.toString());
@@ -193,13 +199,17 @@ public final class DbBootstrap implements AutoCloseable {
         cfg.setSocket(settings.socketPath().toString());
         cfg.setPort(settings.port());
         cfg.setSecurityDisabled(!enforceGrants);
+        TlsMaterial.ensure(settings.dataDir().getParent().resolve("tls")).ifPresent(files -> {
+            cfg.addArg("--ssl-cert=" + files.cert());
+            cfg.addArg("--ssl-key=" + files.key());
+        });
         if (enforceGrants) {
             cfg.addArg("--bind-address=" + LOOPBACK);
         } else {
             cfg.addArg("--skip-networking");
         }
         try {
-            DB server = DB.newEmbeddedDB(cfg.build());
+            DB server = ApplicationStoppedDb.create(cfg.build());
             server.start();
             return server;
         } catch (ManagedProcessException e) {

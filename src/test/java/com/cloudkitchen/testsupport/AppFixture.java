@@ -9,6 +9,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.util.Properties;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Builds whole {@link AppContext} instances on the shared embedded test database: the real wiring (workers, monitor,
@@ -17,7 +19,39 @@ import java.util.Properties;
  */
 public final class AppFixture {
 
+    /** Prefix of the scratch directories this class creates; the cleanup below accepts nothing else. */
+    static final String SCRATCH_PREFIX = "app-files-";
+
+    /** Exactly the directories {@link #scratchDirectory()} created in this JVM (Phase 8, P8-D6: they were never deleted). */
+    private static final Set<Path> CREATED = ConcurrentHashMap.newKeySet();
+
+    static {
+        Runtime.getRuntime().addShutdownHook(new Thread(AppFixture::deleteScratchDirectories, "app-fixture-cleanup"));
+    }
+
     private AppFixture() {
+    }
+
+    /**
+     * Deletes the scratch directories created by this JVM and nothing else: a path is deleted only if it is in the registry
+     * of directories this class created, sits directly under {@code data/test} and starts with {@value #SCRATCH_PREFIX}.
+     * Directories of earlier runs, other tests and the user are never listed, matched by pattern or touched.
+     *
+     * @return how many directories were deleted
+     */
+    public static int deleteScratchDirectories() {
+        Path parent = Path.of("data", "test").toAbsolutePath();
+        int deleted = 0;
+        for (Path directory : Set.copyOf(CREATED)) {
+            boolean ours = directory.getParent() != null && directory.getParent().equals(parent)
+                    && directory.getFileName().toString().startsWith(SCRATCH_PREFIX);
+            if (ours && Files.isDirectory(directory)) {
+                TestDatabase.deleteTree(directory);
+                deleted++;
+            }
+            CREATED.remove(directory);
+        }
+        return deleted;
     }
 
     /** The properties of a fast test configuration; {@code overrides} are alternating keys and values. */
@@ -50,7 +84,9 @@ public final class AppFixture {
         try {
             Path parent = Path.of("data", "test").toAbsolutePath();
             Files.createDirectories(parent);
-            return Files.createTempDirectory(parent, "app-files-");
+            Path directory = Files.createTempDirectory(parent, SCRATCH_PREFIX);
+            CREATED.add(directory);
+            return directory;
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
