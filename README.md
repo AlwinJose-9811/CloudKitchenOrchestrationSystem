@@ -108,6 +108,7 @@ The SQL is written in the common MySQL/MariaDB subset, and the DAOs are plain JD
 |---|---|
 | Whole build: compile, all tests, WAR | `./mvnw clean verify` (Windows: `mvnw.cmd clean verify`). The embedded database needs a non-root user. Takes about 15 to 16 minutes on the 4-CPU test machine (three measured builds: 927 to 954 s). The test count is stated in `docs/EVIDENCE.md`; do not rely on a number copied elsewhere. |
 | A few test classes | `./mvnw -q test -Dtest='OrderServiceTest,ArchitectureRulesTest'` |
+| Live end-to-end check of a running instance | `python3 scripts/live_acceptance.py --confirm` (needs `CK_ADMIN_PASSWORD`, `CK_STAFF_PASSWORD`; **writes to the instance**, use a throw-away one); the full procedure, including the `kill -9` recovery check, is in [docs/ACCEPTANCE_TEST_PLAN.md](docs/ACCEPTANCE_TEST_PLAN.md) |
 | Build only the WAR | `./mvnw -q package` -> `target/*.war` (built by `verify` too) |
 | Inspect the WAR | `jar tf target/*.war` (contains JSTL, HikariCP, the driver, Logback; no Tomcat, MariaDB4j, Spring or servlet API) |
 
@@ -187,5 +188,6 @@ These are the honest gaps at the time of writing; the evidence is in `docs/EVIDE
 * `docs/SRS.md`, `docs/SDD.md`, `docs/DATABASE_DESIGN.md` - requirements, design, schema.
 * `docs/IMPLEMENTATION_ROADMAP.md`, `docs/TESTING_STRATEGY.md` - plan and test strategy.
 * `docs/TRACEABILITY.md` - requirement -> implementation -> verification -> evidence -> status.
+* `docs/ACCEPTANCE_TEST_PLAN.md` - kinds of checks, the live acceptance script, the crash and restart procedure.
 * `docs/EVIDENCE.md` - the only proof that something works (commands, results, dates, limitations).
 * `docs/JAVA_CONCEPT_MAPPING.md`, `docs/REVIEW_2_PREPARATION.md` - Java concepts and viva preparation.
