@@ -99,7 +99,7 @@ class SecurityHeadersWebTest {
             assertFalse(body.toLowerCase().contains("<script"), body);
             assertFalse(body.matches("(?s).*\\sstyle\\s*=.*"), body);
             assertFalse(body.matches("(?s).*\\son[a-z]+\\s*=.*"), body);
-            assertTrue(body.contains("href=\"/static/app.css\""), "the only style comes from this origin");
+            assertTrue(body.contains("href=\"/static/app.css?v="), "the only style comes from this origin (the version makes browsers refetch it after a restyle)");
         }
     }
 
