@@ -191,6 +191,19 @@ public final class DbBootstrap implements AutoCloseable {
         }
     }
 
+    /**
+     * Network option of the server. The one-time first-start server (no grant checks) is normally reachable only
+     * through the Unix socket ({@code --skip-networking}). Windows has no Unix socket and MariaDB4j's client connects
+     * by port there, so on Windows that server listens on the loopback address only, for the few seconds it runs.
+     */
+    static String networkArgument(boolean enforceGrants, boolean windows) {
+        return enforceGrants || windows ? "--bind-address=" + LOOPBACK : "--skip-networking";
+    }
+
+    private static boolean isWindows() {
+        return System.getProperty("os.name", "").toLowerCase().startsWith("windows");
+    }
+
     private DB launch(boolean enforceGrants) throws CloudKitchenException {
         DBConfigurationBuilder cfg = DBConfigurationBuilder.newBuilder();
         cfg.setBaseDir(settings.baseDir().toFile());
@@ -203,11 +216,7 @@ public final class DbBootstrap implements AutoCloseable {
             cfg.addArg("--ssl-cert=" + files.cert());
             cfg.addArg("--ssl-key=" + files.key());
         });
-        if (enforceGrants) {
-            cfg.addArg("--bind-address=" + LOOPBACK);
-        } else {
-            cfg.addArg("--skip-networking");
-        }
+        cfg.addArg(networkArgument(enforceGrants, isWindows()));
         try {
             DB server = ApplicationStoppedDb.create(cfg.build());
             server.start();
