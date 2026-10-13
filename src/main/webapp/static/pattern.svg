@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="220" height="220" viewBox="0 0 220 220">
+  <g fill="none" stroke="#a9794a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity="0.13">
+    <!-- cooking pot -->
+    <path d="M24 44h40v22a8 8 0 0 1-8 8H32a8 8 0 0 1-8-8z"/><path d="M18 44h52M38 38h12M18 52h-6M70 52h6"/>
+    <!-- tomato -->
+    <circle cx="160" cy="58" r="15"/><path d="M152 46c4 3 12 3 16 0M160 43l-3-7M160 43l4-6"/>
+    <!-- whisk -->
+    <path d="M66 150v-26"/><ellipse cx="66" cy="168" rx="8" ry="20"/><ellipse cx="66" cy="168" rx="3" ry="20"/>
+    <!-- spoon and fork -->
+    <ellipse cx="150" cy="150" rx="8" ry="11"/><path d="M150 161v34"/>
+    <path d="M184 140v14a8 8 0 0 0 16 0v-14M192 140v55M184 140v14M200 140v14"/>
+    <!-- chili -->
+    <path d="M110 100c14 0 22 10 22 24 0 8-6 14-12 12 4-8-2-16-10-16"/><path d="M110 100l-4-6"/>
+  </g>
+</svg>

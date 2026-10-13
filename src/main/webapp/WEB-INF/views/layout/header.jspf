@@ -8,11 +8,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title><c:out value="${pageTitle}" default="Cloud Kitchen"/> - Cloud Kitchen</title>
   <link rel="stylesheet" href="<c:url value='/static/app.css'/>">
+  <link rel="icon" type="image/svg+xml" href="<c:url value='/static/logo.svg'/>">
   <c:if test="${not empty refreshSeconds}"><meta http-equiv="refresh" content="<c:out value='${refreshSeconds}'/>"></c:if>
 </head>
-<body>
+<body<c:if test="${not empty refreshSeconds}"> class="live"</c:if>>
 <header class="site-header">
-  <a class="brand" href="<c:url value='/'/>">Cloud Kitchen</a>
+  <a class="brand" href="<c:url value='/'/>"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span><span class="brand-name">Cloud Kitchen</span></a>
   <c:if test="${not empty requestScope['ck.currentUser']}">
     <nav aria-label="Main">
       <a href="<c:url value='/dashboard'/>">Dashboard</a>

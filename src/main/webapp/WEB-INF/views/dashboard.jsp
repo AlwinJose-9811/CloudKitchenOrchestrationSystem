@@ -1,5 +1,6 @@
 <%@ page contentType="text/html;charset=UTF-8" session="false" %>
 <%@ taglib prefix="c" uri="jakarta.tags.core" %>
+<%@ taglib prefix="fn" uri="jakarta.tags.functions" %>
 <c:set var="pageTitle" value="Dashboard"/>
 <%@ include file="/WEB-INF/views/layout/header.jspf" %>
 <h1>Dashboard</h1>
@@ -28,7 +29,7 @@
     <tbody>
     <c:forEach var="s" items="${view.stations}">
       <tr>
-        <td><c:out value="${s.stationCode}"/> (<c:out value="${s.brandName}"/>)</td>
+        <td><c:out value="${s.stationCode}"/> (<c:out value="${s.brandName}"/>)<span class="dish dish-<c:out value='${fn:toLowerCase(s.stationCode)}'/>" aria-hidden="true"></span></td>
         <td><c:out value="${s.queueSize}"/> / <c:out value="${s.queueCapacity}"/>
           <progress max="<c:out value='${s.queueCapacity}'/>" value="<c:out value='${s.queueSize}'/>"></progress></td>
         <td><c:out value="${s.worker.state}"/><c:if test="${s.paused}"> (paused)</c:if></td>
