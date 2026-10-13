@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Application log (SDD 8.3, NFR-OBS-01): console plus a rolling file. The thread name is in the pattern, so worker threads
+     such as station-BIRYANI-worker are visible. Passwords, hashes, secrets, session ids and customer data are never passed
+     to a logger; the structured order events go to the separate orders.log (NioOrderEventLog).
+     The directory of the rolling file is ${CK_APP_LOG_DIR}, default ./logs; set -DCK_APP_LOG_DIR=... to move it. -->
+<configuration>
+  <property name="CK_APP_LOG_DIR" value="${CK_APP_LOG_DIR:-logs}"/>
+
+  <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+    <encoder>
+      <pattern>%d{HH:mm:ss.SSS} %-5level [%thread] %logger{36} - %msg%n</pattern>
+    </encoder>
+  </appender>
+
+  <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+    <file>${CK_APP_LOG_DIR}/app.log</file>
+    <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+      <fileNamePattern>${CK_APP_LOG_DIR}/app.%d{yyyy-MM-dd}.%i.log</fileNamePattern>
+      <maxFileSize>10MB</maxFileSize>
+      <maxHistory>7</maxHistory>
+      <totalSizeCap>100MB</totalSizeCap>
+    </rollingPolicy>
+    <encoder>
+      <pattern>%d{ISO8601} [%thread] %-5level %logger{20} - %msg%n</pattern>
+    </encoder>
+  </appender>
+
+  <logger name="com.cloudkitchen" level="INFO"/>
+  <logger name="ch.vorburger" level="INFO"/>
+  <logger name="com.zaxxer.hikari" level="INFO"/>
+
+  <root level="INFO">
+    <appender-ref ref="CONSOLE"/>
+    <appender-ref ref="FILE"/>
+  </root>
+</configuration>

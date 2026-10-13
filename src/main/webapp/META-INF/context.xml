@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Sessions are not written to disk when the web application stops and are not read back at the next start (D-082).
+     A login must not survive a restart. This file is read by the embedded launcher (Tomcat.addWebapp) and by a
+     standalone Tomcat that deploys the WAR. -->
+<Context>
+  <Manager pathname="" />
+</Context>

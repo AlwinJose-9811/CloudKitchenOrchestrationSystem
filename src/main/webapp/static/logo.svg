@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Chef hat">
+  <g fill="#fff7e6" stroke="#e9a23b" stroke-width="2.5" stroke-linejoin="round">
+    <circle cx="20" cy="26" r="11"/>
+    <circle cx="32" cy="20" r="13"/>
+    <circle cx="44" cy="26" r="11"/>
+    <rect x="17" y="30" width="30" height="20" rx="3"/>
+  </g>
+  <rect x="17" y="46" width="30" height="9" rx="3" fill="#c4572f" stroke="#a3441f" stroke-width="2"/>
+  <path d="M25 33v10M32 33v10M39 33v10" stroke="#f0d9b0" stroke-width="2" stroke-linecap="round"/>
+</svg>

@@ -22,3 +22,16 @@
 # virtual machine crash logs, see http://www.java.com/en/download/help/error_hotspot.xml
 hs_err_pid*
 replay_pid*
+
+# Cloud Kitchen Orchestration System: generated output, runtime data and local config (Phase 1, A-04)
+target/
+data/
+logs/
+snapshots/
+reports/
+config/application.properties
+*.ser
+.idea/
+*.iml
+.vscode/
+.DS_Store

@@ -1,0 +1,178 @@
+/* One stylesheet, no inline styles, no scripts, no outside fonts or images: the Content-Security-Policy allows this origin only.
+   Theme: a warm kitchen (cream tiles, terracotta, saffron, herb green). All motion is CSS, short and gentle, and is switched
+   off for people who ask their system for reduced motion. */
+:root {
+  --ink: #2d2420; --muted: #6b5b4e; --cream: #fbf3e4; --paper: #fffaf1; --line: #e8d7ba; --espresso: #3a2a22;
+  --terracotta: #b24a25; --terracotta-dark: #8f3a1b; --saffron: #e9a23b; --herb: #3f6b2f; --tomato: #a3231b; --teal: #1f6a66;
+  --fg: var(--ink); --bg: var(--cream); --card: var(--paper); --accent: #9a3f1b; --ok: var(--herb); --warn: #8a5a00; --bad: var(--tomato);
+  --shadow: 0 2px 10px rgba(80, 50, 20, 0.09);
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0; font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--fg);
+  background-color: var(--bg); background-image: url("pattern.svg"); background-size: 220px 220px;
+}
+a { color: var(--accent); text-underline-offset: 3px; }
+a:hover { color: var(--terracotta-dark); }
+:focus-visible { outline: 3px solid var(--saffron); outline-offset: 2px; border-radius: 6px; }
+
+/* ---- header: espresso bar with a gingham edge, a logo with a little steam ---- */
+.site-header {
+  position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem 1.25rem; padding: 0.7rem 1.1rem;
+  background: linear-gradient(180deg, #46332a, var(--espresso)); color: #fdf2dc; margin-bottom: 14px;
+  box-shadow: 0 3px 12px rgba(40, 20, 10, 0.25);
+}
+.site-header::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: -10px; height: 10px;
+  background-image: repeating-linear-gradient(90deg, #c4572f 0 14px, #fff4de 14px 28px);
+  opacity: 0.9;
+}
+.brand { display: inline-flex; align-items: center; gap: 0.6rem; text-decoration: none; color: #fdf2dc; }
+.brand:hover { color: #fff; }
+.brand-mark { position: relative; display: inline-block; width: 38px; height: 38px; background: url("logo.svg") center / contain no-repeat; transition: transform 0.35s ease; }
+.brand:hover .brand-mark { transform: rotate(-6deg) scale(1.08); }
+.brand-name { font: italic 700 1.35rem/1 Georgia, "Palatino Linotype", "Book Antiqua", serif; letter-spacing: 0.01em; }
+.brand-mark i {
+  position: absolute; top: 2px; width: 6px; height: 6px; border-radius: 50%; background: rgba(255, 255, 255, 0.7);
+  filter: blur(1px); opacity: 0; animation: steam 3.2s ease-in infinite;
+}
+.brand-mark i:nth-of-type(1) { left: 9px; animation-delay: 0s; }
+.brand-mark i:nth-of-type(2) { left: 17px; animation-delay: 1.1s; }
+.brand-mark i:nth-of-type(3) { left: 25px; animation-delay: 2.1s; }
+.site-header nav { display: flex; flex-wrap: wrap; gap: 0.25rem 0.35rem; }
+.site-header nav a {
+  color: #fdf2dc; text-decoration: none; padding: 0.3rem 0.7rem; border-radius: 999px; font-size: 0.95rem;
+  transition: background-color 0.2s ease, transform 0.2s ease, color 0.2s ease;
+}
+.site-header nav a:hover { background: rgba(255, 255, 255, 0.14); color: #fff; transform: translateY(-1px); }
+.site-header .logout { margin-left: auto; display: flex; align-items: center; gap: 0.6rem; }
+.site-header .who { color: #f3d9a6; font-size: 0.95rem; }
+.site-header .logout button { background: transparent; color: #fdf2dc; border: 1px solid rgba(253, 242, 220, 0.55); box-shadow: none; }
+.site-header .logout button:hover { background: rgba(255, 255, 255, 0.14); }
+
+main { max-width: 72rem; margin: 0 auto; padding: 1.25rem 1rem 1rem; }
+.site-footer { max-width: 72rem; margin: 0 auto; padding: 0 1rem 1.5rem; color: var(--muted); font-size: 0.875rem; text-align: center; }
+
+/* ---- headings: menu-board serif with a saffron rule ---- */
+h1, h2 { font-family: Georgia, "Palatino Linotype", "Book Antiqua", serif; color: var(--espresso); }
+h1 { font-size: 2rem; margin: 0 0 0.9rem; line-height: 1.2; }
+h1::after { content: ""; display: block; width: 3.2rem; height: 4px; margin-top: 0.4rem; border-radius: 4px; background: var(--saffron); }
+h2 { font-size: 1.25rem; margin: 1.6rem 0 0.6rem; }
+h2::before { content: ""; display: inline-block; width: 0.6rem; height: 0.6rem; margin-right: 0.5rem; border-radius: 50%; background: var(--terracotta); vertical-align: 0.05em; }
+
+/* ---- tables as recipe cards ---- */
+table {
+  border-collapse: separate; border-spacing: 0; width: 100%; background: var(--card); border: 1px solid var(--line);
+  border-radius: 14px; overflow: hidden; box-shadow: var(--shadow);
+}
+th, td { padding: 0.55rem 0.8rem; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); }
+tr:last-child > th, tr:last-child > td { border-bottom: 0; }
+thead th { background: #f7e6c4; color: var(--espresso); font-weight: 700; font-size: 0.92rem; letter-spacing: 0.02em; }
+tbody tr { transition: background-color 0.18s ease; }
+tbody tr:nth-child(even) { background: #fff6e4; }
+tbody tr:hover { background: #ffecc8; }
+.facts { width: auto; min-width: 20rem; }
+.facts th { width: 14rem; background: #f7e6c4; }
+.facts tr:hover { background: #ffecc8; }
+
+/* ---- forms and buttons ---- */
+label { display: block; margin: 0.6rem 0 0.25rem; font-weight: 600; color: var(--espresso); }
+input, select, button { font: inherit; padding: 0.45rem 0.7rem; }
+input, select { border: 1px solid #d9c29b; border-radius: 10px; background: #fff; color: var(--ink); transition: border-color 0.2s ease, box-shadow 0.2s ease; }
+input:focus, select:focus { outline: none; border-color: var(--saffron); box-shadow: 0 0 0 3px rgba(233, 162, 59, 0.35); }
+button {
+  cursor: pointer; border: 0; border-radius: 999px; padding: 0.45rem 1.1rem; font-weight: 600; color: #fff; background: var(--terracotta);
+  box-shadow: 0 2px 0 var(--terracotta-dark); transition: transform 0.15s ease, box-shadow 0.15s ease, background-color 0.2s ease;
+}
+button:hover { background: #c4562c; transform: translateY(-1px); box-shadow: 0 3px 0 var(--terracotta-dark); }
+button:active { transform: translateY(1px); box-shadow: 0 0 0 var(--terracotta-dark); }
+
+/* ---- messages ---- */
+.flash {
+  padding: 0.65rem 0.9rem; border-radius: 12px; border: 1px solid var(--line); border-left-width: 6px; background: var(--card);
+  box-shadow: var(--shadow); animation: slide-in 0.4s ease both;
+}
+.flash-success { border-color: var(--ok); background: #eef6e8; color: #2b4f1f; }
+.flash-error { border-color: var(--bad); background: #fbe9e5; color: #7d1d15; }
+.flash-info { border-color: var(--saffron); background: #fff3d9; color: #6a4300; }
+
+/* ---- status badges: colour per stage, a little life where work is happening ---- */
+.badge {
+  display: inline-block; padding: 0.12rem 0.65rem; border-radius: 999px; border: 1px solid transparent; font-size: 0.78rem;
+  font-weight: 700; letter-spacing: 0.03em; background: #efe5d2; color: #5b4a3a;
+}
+.badge-routed { background: #dce9f0; color: #1f4f66; }
+.badge-preparing { background: #ffe0b8; color: #8a3f08; animation: sizzle 1.8s ease-in-out infinite; }
+.badge-packed { background: #fff0b3; color: #6f5000; }
+.badge-out_for_delivery { background: #d3ebe8; color: var(--teal); }
+.badge-out_for_delivery::after { content: "\2192"; display: inline-block; margin-left: 0.3rem; animation: ride 1.3s ease-in-out infinite; }
+.badge-delivered { background: #d9edcc; color: #2b5a1c; }
+.badge-delivered::before { content: "\2713\00a0"; }
+.badge-failed { background: #f8d5cf; color: #86180f; }
+.badge-cancelled { background: #efe0dd; color: #7a2a21; }
+
+/* ---- station icons and queue bars ---- */
+.dish::after { display: inline-block; margin-left: 0.4rem; font-size: 1.1rem; vertical-align: -0.05em; }
+.dish-biryani::after { content: "\1F35B"; }
+.dish-burger::after { content: "\1F354"; }
+.dish-pizza::after { content: "\1F355"; }
+progress { appearance: none; -webkit-appearance: none; width: 7rem; height: 10px; border: 0; border-radius: 999px; background: #ead9bd; vertical-align: middle; overflow: hidden; }
+progress::-webkit-progress-bar { background: #ead9bd; border-radius: 999px; }
+progress::-webkit-progress-value {
+  border-radius: 999px; transition: width 0.6s ease; background-size: 22px 22px; animation: stripes 1.2s linear infinite;
+  background-image: repeating-linear-gradient(45deg, #e9a23b 0 8px, #f3b85c 8px 16px);
+}
+progress::-moz-progress-bar { border-radius: 999px; background: #e9a23b; }
+
+/* ---- sign-in card ---- */
+.login {
+  max-width: 24rem; margin: 2.2rem auto; padding: 1.6rem 1.8rem 1.8rem; background: var(--card); border: 1px solid var(--line);
+  border-radius: 20px; box-shadow: 0 8px 28px rgba(80, 50, 20, 0.16);
+}
+.login::before {
+  content: ""; display: block; width: 76px; height: 76px; margin: 0 auto 0.3rem; background: url("logo.svg") center / contain no-repeat;
+  animation: float 4s ease-in-out infinite;
+}
+.login h1 { text-align: center; }
+.login h1::after { margin-left: auto; margin-right: auto; }
+.login input { width: 100%; }
+.login button { width: 100%; padding: 0.6rem 1rem; }
+
+/* ---- misc kept from the first version ---- */
+.error-page { max-width: 40rem; }
+.error-id code { font-size: 1rem; }
+.note { color: var(--muted); }
+.filter { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem; margin: 0.75rem 0; }
+.filter label { margin: 0; }
+.low { color: var(--bad); }
+.pager a { margin-right: 1rem; }
+
+/* ---- gentle entrance on normal pages (not on the auto-refreshing dashboard, which would replay it every few seconds) ---- */
+body:not(.live) main > * { animation: rise 0.5s ease both; }
+body:not(.live) main > *:nth-child(2) { animation-delay: 0.06s; }
+body:not(.live) main > *:nth-child(3) { animation-delay: 0.12s; }
+body:not(.live) main > *:nth-child(4) { animation-delay: 0.18s; }
+body:not(.live) main > *:nth-child(5) { animation-delay: 0.24s; }
+body:not(.live) main > *:nth-child(n+6) { animation-delay: 0.3s; }
+
+@keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+@keyframes slide-in { from { opacity: 0; transform: translateX(-12px); } to { opacity: 1; transform: none; } }
+@keyframes steam { 0% { opacity: 0; transform: translateY(2px) scale(0.6); } 30% { opacity: 0.8; } 100% { opacity: 0; transform: translateY(-16px) scale(1.5); } }
+@keyframes sizzle { 0%, 100% { box-shadow: 0 0 0 0 rgba(233, 162, 59, 0.55); } 50% { box-shadow: 0 0 0 5px rgba(233, 162, 59, 0); } }
+@keyframes ride { 0%, 100% { transform: translateX(0); } 50% { transform: translateX(4px); } }
+@keyframes stripes { from { background-position: 0 0; } to { background-position: 22px 0; } }
+@keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}
+@media (max-width: 480px) {
+  .site-header .logout { margin-left: 0; }
+  th, td { padding: 0.4rem 0.5rem; }
+  h1 { font-size: 1.6rem; }
+}
+/* narrow screens: a wide table scrolls inside itself, the page does not (NFR-USA-01, 375 px) */
+@media (max-width: 640px) {
+  table { display: block; max-width: 100%; overflow-x: auto; }
+}
